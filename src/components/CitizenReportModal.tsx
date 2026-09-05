@@ -21,6 +21,7 @@ import { useOfflineSync } from '../context/OfflineSyncContext';
 import { LocationPoint } from '../types';
 import { api } from '../services/api';
 import { supabase } from '../lib/supabase';
+import { uploadFieldPhoto } from '../lib/reportService';
 
 interface CitizenReportModalProps {
   isOpen: boolean;
@@ -193,10 +194,17 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
 
       // Online submission to Supabase & Live Ingestion Core
       let photoDataUrl = imageBase64;
-      if (!photoDataUrl && selectedFile) {
+      if (selectedFile) {
         try {
-          photoDataUrl = await fileToBase64(selectedFile);
-        } catch {}
+          photoDataUrl = await uploadFieldPhoto(selectedFile);
+        } catch (uploadErr) {
+          console.warn('Permanent photo upload fallback:', uploadErr);
+          if (!photoDataUrl) {
+            try {
+              photoDataUrl = await fileToBase64(selectedFile);
+            } catch {}
+          }
+        }
       }
 
       const reportPayload = {

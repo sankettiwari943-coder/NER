@@ -55,8 +55,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [auditNote, setAuditNote] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 
+  // 1. Permanent Fetch Handler
+  const loadPersistentReports = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('reports')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Failed to load reports from Supabase:', error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setLocalReports(data);
+        // Retain active selection or select first report
+        setSelectedReport((prev: any) => {
+          if (!prev) return data[0];
+          const match = data.find((r: any) => r.id === prev.id);
+          return match || data[0];
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching persistent reports:', err);
+    }
+  };
+
+  // 2. Hydrate on initial render AND on Supabase auth state change (login/logout)
   useEffect(() => {
-    setLocalReports(reports);
+    loadPersistentReports();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || session) {
+        loadPersistentReports();
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reports && reports.length > 0) {
+      setLocalReports((prev) => (prev.length === 0 ? reports : prev));
+    }
   }, [reports]);
 
   // Human Verification Gate (Pending Alerts) State
@@ -453,6 +497,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleUpdateReportStatus = async (newStatus: 'VERIFIED' | 'REJECTED' | 'UNDER_REVIEW' | string) => {
+    if (!selectedReport?.id) return;
+    const targetId = selectedReport.id;
+    const note = (auditNote || reviewNote).trim() || `Report transition to ${newStatus}`;
+
+    // 1. Persist to Supabase
+    const { error } = await supabase
+      .from('reports')
+      .update({
+        status: newStatus,
+        verification_status: newStatus,
+        official_notes: note,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', targetId);
+
+    if (error) {
+      alert('Failed to save status to database: ' + error.message);
+      return;
+    }
+
+    // 2. Update local state
+    setSelectedReport((prev: any) => ({
+      ...prev,
+      status: newStatus,
+      verification_status: newStatus,
+      official_notes: note
+    }));
+
+    setLocalReports((prevList: any[]) =>
+      prevList.map((r) =>
+        r.id === targetId ? { ...r, status: newStatus, verification_status: newStatus, official_notes: note } : r
+      )
+    );
+
+    setAuditNote('');
+    setReviewNote('');
+    alert(`✅ Saved to database: Status set to ${newStatus}`);
   };
 
   const [aiInspecting, setAiInspecting] = useState(false);
