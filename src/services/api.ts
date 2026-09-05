@@ -1029,14 +1029,14 @@ class ApiService {
           latitude: Number(r.latitude) || 25.6747,
           longitude: Number(r.longitude) || 94.1105,
           photo_url: r.photo_url || r.image_url || r.photo || r.imageBase64 || undefined,
-          verification_status: (r.verification_status || (r.status === 'APPROVED' ? 'VERIFIED' : r.status === 'REJECTED' ? 'REJECTED' : 'UNVERIFIED')) as any,
-          admin_notes: r.admin_notes || r.note,
+          verification_status: (r.verification_status || (r.status === 'APPROVED' || r.status === 'VERIFIED' ? 'VERIFIED' : r.status === 'REJECTED' ? 'REJECTED' : 'UNVERIFIED')) as any,
+          admin_notes: r.official_notes || r.admin_notes || r.note,
           created_at: r.created_at || new Date().toISOString(),
           updated_at: r.updated_at || r.created_at || new Date().toISOString()
         }));
 
         const map = new Map<string, CitizenReport>();
-        [...this.dynamicReports, ...sbReports].forEach(item => {
+        [...sbReports, ...this.dynamicReports].forEach(item => {
           if (!map.has(item.id)) {
             map.set(item.id, item);
           }
@@ -1051,22 +1051,29 @@ class ApiService {
 
   public async getReportStatusHistory(reportId: string): Promise<{ history: ReportStatusHistory[] }> {
     try {
+      const { data } = await supabase
+        .from('status_audit_trail')
+        .select('*')
+        .eq('report_id', reportId)
+        .order('timestamp', { ascending: false });
+
+      if (Array.isArray(data) && data.length > 0) {
+        return {
+          history: data.map((d: any) => ({
+            id: d.id || `hist_${Date.now()}`,
+            report_id: d.report_id,
+            previous_status: d.previous_status || 'UNVERIFIED',
+            new_status: d.new_status || 'UNVERIFIED',
+            changed_by: d.officer_id || 'usr_admin',
+            changed_by_name: d.officer_title || 'District Landslide Officer',
+            changed_at: d.timestamp || d.created_at || new Date().toISOString(),
+            note: d.notes || d.note || ''
+          }))
+        };
+      }
       return await this.request(`/api/v1/reports/${reportId}/history`);
     } catch {
-      return {
-        history: [
-          {
-            id: 'hist_1',
-            report_id: reportId,
-            previous_status: 'UNVERIFIED',
-            new_status: 'VERIFIED',
-            changed_by: 'usr_admin',
-            changed_by_name: 'District Landslide Officer',
-            changed_at: new Date().toISOString(),
-            note: 'Verified with GSI satellite radar deformation match.'
-          }
-        ]
-      };
+      return { history: [] };
     }
   }
 

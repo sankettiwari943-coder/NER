@@ -985,12 +985,101 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button
                       id="btn-admin-reject"
                       type="button"
-                      onClick={handleRejectReport}
-                      disabled={actionLoading}
-                      className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium transition cursor-pointer"
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        if (!selectedReport?.id) {
+                          alert("No report currently active to reject!");
+                          return;
+                        }
+
+                        const currentId = selectedReport.id;
+                        const rejectReason = (auditNote || reviewNote)?.trim() || "Rejected: False field report.";
+
+                        // 1. Force state updates immediately
+                        setSelectedReport((prev: any) => ({
+                          ...prev,
+                          status: 'REJECTED',
+                          verification_status: 'REJECTED',
+                          state: 'REJECTED',
+                          official_notes: rejectReason,
+                          audit_trail: [
+                            {
+                              previous_status: prev?.status || prev?.verification_status || 'UNVERIFIED',
+                              new_status: 'REJECTED',
+                              officer: 'District Landslide Officer',
+                              note: rejectReason,
+                              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                            },
+                            ...(prev?.audit_trail || [])
+                          ]
+                        }));
+
+                        setLocalReports((prev: any[]) =>
+                          prev.map((item) =>
+                            item.id === currentId
+                              ? { ...item, status: 'REJECTED', verification_status: 'REJECTED', state: 'REJECTED', official_notes: rejectReason }
+                              : item
+                          )
+                        );
+
+                        setStatusHistory((prev) => [
+                          {
+                            id: 'hist_' + Date.now(),
+                            report_id: currentId,
+                            previous_status: selectedReport?.verification_status || selectedReport?.status || 'UNVERIFIED',
+                            new_status: 'REJECTED',
+                            changed_by: 'usr_admin',
+                            changed_by_name: 'District Landslide Officer',
+                            changed_at: new Date().toISOString(),
+                            note: rejectReason
+                          },
+                          ...prev
+                        ]);
+
+                        setReviewNote('');
+                        setAuditNote('');
+
+                        // 2. Direct database update
+                        const { error } = await supabase
+                          .from('reports')
+                          .update({
+                            status: 'REJECTED',
+                            verification_status: 'REJECTED',
+                            official_notes: rejectReason,
+                            updated_at: new Date().toISOString()
+                          })
+                          .eq('id', currentId);
+
+                        try {
+                          await supabase.from('status_audit_trail').insert([{
+                            report_id: currentId,
+                            previous_status: selectedReport?.status || selectedReport?.verification_status || 'UNVERIFIED',
+                            new_status: 'REJECTED',
+                            officer_title: 'District Landslide Officer',
+                            notes: rejectReason,
+                            timestamp: new Date().toISOString()
+                          }]);
+                        } catch {}
+
+                        try {
+                          await api.updateReportStatus(currentId, 'REJECTED', rejectReason);
+                        } catch {}
+
+                        onRefreshData();
+
+                        if (error) {
+                          alert("Supabase rejected update: " + error.message);
+                        } else {
+                          alert("Report #" + currentId + " successfully marked as REJECTED!");
+                        }
+                      }}
+                      style={{ cursor: 'pointer', zIndex: 9999 }}
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 border-red-400 bg-red-100 hover:bg-red-200 text-red-800 font-bold transition cursor-pointer"
                     >
-                      <XCircle className="w-4 h-4 text-red-500"/>
-                      <span>Reject (False Report)</span>
+                      <XCircle className="w-4 h-4 text-red-600"/>
+                      <span>❌ Reject (False Report)</span>
                     </button>
                     <button
                       id="btn-admin-resolve"
