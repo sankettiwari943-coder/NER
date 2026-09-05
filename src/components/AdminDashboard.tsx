@@ -213,31 +213,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleRejectReport = async () => {
-    if (!selectedReport) {
-      if (typeof window !== 'undefined') alert("No report selected to reject.");
-      return;
-    }
+  // 1. Dedicated Reject Function
+  const handleForceReject = async () => {
+    if (!selectedReport) return;
     const targetId = selectedReport.id;
-    const reason = (auditNote || reviewNote).trim() || 'Rejected: Non-geotechnical/Irrelevant media submission.';
+    const noteText = (auditNote || reviewNote).trim() || 'Submission rejected by Landslide Officer: Invalid or irrelevant media.';
 
-    // 1. Immediate optimistic UI update (both dossier and card list)
+    // Immediate UI update
     setSelectedReport((prev: any) => ({
       ...prev,
       status: 'REJECTED',
       verification_status: 'REJECTED',
       state: 'REJECTED',
-      official_notes: reason,
-      ai_status: 'IRRELEVANT MEDIA DETECTED',
       audit_trail: [
         {
-          previous_status: prev.status || prev.verification_status || prev.state || 'UNVERIFIED',
+          previous_status: prev?.status || prev?.verification_status || prev?.state || 'UNVERIFIED',
           new_status: 'REJECTED',
           officer: 'District Landslide Officer',
-          note: reason,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          note: noteText,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         },
-        ...(prev.audit_trail || [])
+        ...(prev?.audit_trail || [])
       ]
     }));
 
@@ -251,43 +247,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         changed_by: 'usr_admin',
         changed_by_name: 'District Landslide Officer',
         changed_at: new Date().toISOString(),
-        note: reason
+        note: noteText
       },
       ...prev
     ]);
 
-    setLocalReports((prevList: any[]) =>
-      prevList.map((item) =>
-        item.id === targetId
-          ? {
-              ...item,
-              status: 'REJECTED',
-              verification_status: 'REJECTED',
-              state: 'REJECTED',
-              official_notes: reason
-            }
-          : item
+    setLocalReports((prev: any[]) =>
+      prev.map((r) =>
+        r.id === targetId ? { ...r, status: 'REJECTED', verification_status: 'REJECTED', state: 'REJECTED', official_notes: noteText } : r
       )
     );
 
     setReviewNote('');
     setAuditNote('');
 
-    // 2. Persist across all possible Supabase column variants
+    // Persist to Supabase
     try {
-      const { error } = await supabase
+      await supabase
         .from('reports')
         .update({
           status: 'REJECTED',
           verification_status: 'REJECTED',
-          official_notes: reason,
+          official_notes: noteText,
           updated_at: new Date().toISOString()
         })
         .eq('id', targetId);
-
-      if (error) {
-        console.warn('Direct update fallback:', error);
-      }
 
       try {
         await supabase.from('status_audit_trail').insert([{
@@ -295,29 +279,108 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           previous_status: selectedReport?.status || selectedReport?.verification_status || 'UNVERIFIED',
           new_status: 'REJECTED',
           officer_title: 'District Landslide Officer',
-          notes: reason,
+          notes: noteText,
           timestamp: new Date().toISOString()
         }]);
-      } catch (auditErr) {
-        console.warn('Audit trail logging skipped:', auditErr);
-      }
+      } catch {}
 
       try {
-        await api.updateReportStatus(targetId, 'REJECTED', reason);
-      } catch (apiErr) {
-        console.warn('API status update warning:', apiErr);
-      }
+        await api.updateReportStatus(targetId, 'REJECTED', noteText);
+      } catch {}
 
       onRefreshData();
     } catch (err) {
-      console.error('Supabase reject write failed:', err);
+      console.error('Failed to update Supabase status:', err);
+    }
+  };
+
+  const handleRejectReport = handleForceReject;
+
+  // 2. Dedicated Verify Function
+  const handleForceVerify = async () => {
+    if (!selectedReport) return;
+    const targetId = selectedReport.id;
+    const noteText = (auditNote || reviewNote).trim() || 'Verified with GSI satellite radar deformation match.';
+
+    setSelectedReport((prev: any) => ({
+      ...prev,
+      status: 'VERIFIED',
+      verification_status: 'VERIFIED',
+      state: 'VERIFIED',
+      audit_trail: [
+        {
+          previous_status: prev?.status || prev?.verification_status || prev?.state || 'UNVERIFIED',
+          new_status: 'VERIFIED',
+          officer: 'District Landslide Officer',
+          note: noteText,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        },
+        ...(prev?.audit_trail || [])
+      ]
+    }));
+
+    setStatusHistory((prev) => [
+      {
+        id: 'hist_' + Date.now(),
+        report_id: targetId,
+        previous_status: selectedReport?.verification_status || selectedReport?.status || (selectedReport as any)?.state || 'UNVERIFIED',
+        new_status: 'VERIFIED',
+        changed_by: 'usr_admin',
+        changed_by_name: 'District Landslide Officer',
+        changed_at: new Date().toISOString(),
+        note: noteText
+      },
+      ...prev
+    ]);
+
+    setLocalReports((prev: any[]) =>
+      prev.map((r) =>
+        r.id === targetId ? { ...r, status: 'VERIFIED', verification_status: 'VERIFIED', state: 'VERIFIED', official_notes: noteText } : r
+      )
+    );
+
+    setReviewNote('');
+    setAuditNote('');
+
+    try {
+      await supabase
+        .from('reports')
+        .update({
+          status: 'VERIFIED',
+          verification_status: 'VERIFIED',
+          official_notes: noteText,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', targetId);
+
+      try {
+        await supabase.from('status_audit_trail').insert([{
+          report_id: targetId,
+          previous_status: selectedReport?.status || selectedReport?.verification_status || 'UNVERIFIED',
+          new_status: 'VERIFIED',
+          officer_title: 'District Landslide Officer',
+          notes: noteText,
+          timestamp: new Date().toISOString()
+        }]);
+      } catch {}
+
+      try {
+        await api.updateReportStatus(targetId, 'VERIFIED', noteText);
+      } catch {}
+
+      onRefreshData();
+    } catch (err) {
+      console.error('Failed to update Supabase status:', err);
     }
   };
 
   const handleUpdateStatus = async (newStatus: string) => {
     if (!selectedReport) return;
     if (newStatus === 'REJECTED') {
-      return handleRejectReport(selectedReport.id);
+      return handleForceReject();
+    }
+    if (newStatus === 'VERIFIED') {
+      return handleForceVerify();
     }
     setActionLoading(true);
     const noteText = (auditNote || reviewNote).trim();
@@ -902,7 +965,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       id="btn-admin-verify"
-                      onClick={() => handleUpdateStatus('VERIFIED')}
+                      type="button"
+                      onClick={handleForceVerify}
                       disabled={actionLoading}
                       className="flex items-center justify-center gap-1.5 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition disabled:opacity-50 cursor-pointer"
                     >
