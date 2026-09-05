@@ -213,107 +213,104 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleRejectReport = async (reportId?: string) => {
-    const targetId = reportId || selectedReport?.id;
-    if (!targetId) {
-      alert("No report selected to reject.");
+  const handleRejectReport = async () => {
+    if (!selectedReport) {
+      if (typeof window !== 'undefined') alert("No report selected to reject.");
       return;
     }
+    const targetId = selectedReport.id;
+    const reason = (auditNote || reviewNote).trim() || 'Rejected: Non-geotechnical/Irrelevant media submission.';
 
-    const auditReason = (auditNote || reviewNote).trim() || "Rejected by District Landslide Officer: Irrelevant/False field submission.";
+    // 1. Immediate optimistic UI update (both dossier and card list)
+    setSelectedReport((prev: any) => ({
+      ...prev,
+      status: 'REJECTED',
+      verification_status: 'REJECTED',
+      state: 'REJECTED',
+      official_notes: reason,
+      ai_status: 'IRRELEVANT MEDIA DETECTED',
+      audit_trail: [
+        {
+          previous_status: prev.status || prev.verification_status || prev.state || 'UNVERIFIED',
+          new_status: 'REJECTED',
+          officer: 'District Landslide Officer',
+          note: reason,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        },
+        ...(prev.audit_trail || [])
+      ]
+    }));
 
-    setActionLoading(true);
+    // Update status history UI
+    setStatusHistory((prev) => [
+      {
+        id: 'hist_' + Date.now(),
+        report_id: targetId,
+        previous_status: selectedReport?.verification_status || selectedReport?.status || (selectedReport as any)?.state || 'UNVERIFIED',
+        new_status: 'REJECTED',
+        changed_by: 'usr_admin',
+        changed_by_name: 'District Landslide Officer',
+        changed_at: new Date().toISOString(),
+        note: reason
+      },
+      ...prev
+    ]);
+
+    setLocalReports((prevList: any[]) =>
+      prevList.map((item) =>
+        item.id === targetId
+          ? {
+              ...item,
+              status: 'REJECTED',
+              verification_status: 'REJECTED',
+              state: 'REJECTED',
+              official_notes: reason
+            }
+          : item
+      )
+    );
+
+    setReviewNote('');
+    setAuditNote('');
+
+    // 2. Persist across all possible Supabase column variants
     try {
-      // 1. Update Supabase table directly
       const { error } = await supabase
         .from('reports')
         .update({
           status: 'REJECTED',
           verification_status: 'REJECTED',
-          official_notes: auditReason,
-          verified_at: new Date().toISOString()
+          official_notes: reason,
+          updated_at: new Date().toISOString()
         })
         .eq('id', targetId);
 
       if (error) {
-        console.warn("Supabase update warning, proceeding with state update:", error);
+        console.warn('Direct update fallback:', error);
       }
 
-      // 2. Insert into audit trail table if present
       try {
         await supabase.from('status_audit_trail').insert([{
           report_id: targetId,
           previous_status: selectedReport?.status || selectedReport?.verification_status || 'UNVERIFIED',
           new_status: 'REJECTED',
           officer_title: 'District Landslide Officer',
-          notes: auditReason,
+          notes: reason,
           timestamp: new Date().toISOString()
         }]);
       } catch (auditErr) {
-        console.warn("Audit trail logging skipped:", auditErr);
+        console.warn('Audit trail logging skipped:', auditErr);
       }
 
-      // 3. Immediately update active selected report state
-      setSelectedReport((prev: any) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          status: 'REJECTED',
-          verification_status: 'REJECTED',
-          official_notes: auditReason,
-          audit_trail: [
-            {
-              previous_status: prev.status || prev.verification_status || 'UNVERIFIED',
-              new_status: 'REJECTED',
-              officer: 'District Landslide Officer',
-              note: auditReason,
-              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            },
-            ...(prev.audit_trail || [])
-          ]
-        };
-      });
-
-      // Update status history UI
-      setStatusHistory((prev) => [
-        {
-          id: 'hist_' + Date.now(),
-          report_id: targetId,
-          previous_status: selectedReport?.verification_status || 'UNVERIFIED',
-          new_status: 'REJECTED',
-          changed_by: 'usr_admin',
-          changed_by_name: 'District Landslide Officer',
-          changed_at: new Date().toISOString(),
-          note: auditReason
-        },
-        ...prev
-      ]);
-
-      // 4. Update the left sidebar reports list
-      setLocalReports((prevReports: any[]) =>
-        prevReports.map((r) =>
-          r.id === targetId ? { ...r, status: 'REJECTED', verification_status: 'REJECTED', official_notes: auditReason } : r
-        )
-      );
-
-      // Call API layer as well
       try {
-        await api.updateReportStatus(targetId, 'REJECTED', auditReason);
+        await api.updateReportStatus(targetId, 'REJECTED', reason);
       } catch (apiErr) {
-        console.warn("API status update warning:", apiErr);
+        console.warn('API status update warning:', apiErr);
       }
-
-      // Clear the note input
-      setReviewNote('');
-      setAuditNote('');
 
       onRefreshData();
-      alert("✅ Submission rejected and marked as REJECTED in database.");
-    } catch (err: any) {
-      console.error("Reject execution error:", err);
-      alert(`Could not reject report: ${err.message}`);
-    } finally {
-      setActionLoading(false);
+    } catch (err) {
+      console.error('Supabase reject write failed:', err);
     }
   };
 
@@ -756,17 +753,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-slate-900 truncate">{report.hazard_type}</span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            report.verification_status === 'VERIFIED' || report.status === 'VERIFIED'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : report.verification_status === 'UNDER REVIEW' || report.status === 'UNDER REVIEW'
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : report.verification_status === 'REJECTED' || report.status === 'REJECTED'
-                              ? 'bg-red-100 text-red-700 border border-red-200'
-                              : 'bg-amber-50 text-amber-700 border border-amber-200'
-                          }`}>
-                            {report.verification_status || report.status || 'UNVERIFIED'}
-                          </span>
+                          {(() => {
+                            const currentStatus = ((report as any).status || report.verification_status || (report as any).state || 'UNVERIFIED').toUpperCase();
+
+                            if (currentStatus === 'REJECTED') {
+                              return <span className="px-2 py-0.5 text-xs font-semibold rounded border bg-red-50 text-red-700 border-red-200">REJECTED</span>;
+                            }
+                            if (currentStatus === 'VERIFIED') {
+                              return <span className="px-2 py-0.5 text-xs font-semibold rounded border bg-emerald-50 text-emerald-700 border-emerald-200">VERIFIED</span>;
+                            }
+                            if (currentStatus === 'UNDER REVIEW') {
+                              return <span className="px-2 py-0.5 text-xs font-semibold rounded border bg-blue-50 text-blue-700 border-blue-200">UNDER REVIEW</span>;
+                            }
+                            return <span className="px-2 py-0.5 text-xs font-semibold rounded border bg-amber-50 text-amber-700 border-amber-200">UNVERIFIED</span>;
+                          })()}
                         </div>
 
                         <div className="text-slate-500 text-[11px] truncate">{report.location_name}</div>
@@ -921,11 +921,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button
                       id="btn-admin-reject"
                       type="button"
-                      onClick={() => handleRejectReport()}
+                      onClick={handleRejectReport}
                       disabled={actionLoading}
-                      className="flex items-center justify-center gap-1.5 py-2 px-3 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium shadow-2xs transition disabled:opacity-50 cursor-pointer"
+                      className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium transition cursor-pointer"
                     >
-                      <XCircle className="w-4 h-4 text-red-500" />
+                      <XCircle className="w-4 h-4 text-red-500"/>
                       <span>Reject (False Report)</span>
                     </button>
                     <button
