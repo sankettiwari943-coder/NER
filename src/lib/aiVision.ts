@@ -16,7 +16,11 @@ export async function analyzeFieldImage(imageBase64: string): Promise<{
   assessmentText: string;
 }> {
   // Read ONLY from environment variables (never hardcode the secret string here)
-  const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  const apiKey =
+    import.meta.env.VITE_GEMINI_API_KEY ||
+    (import.meta as any).env?.GEMINI_API_KEY ||
+    (typeof window !== 'undefined' && (window as any).__ENV__?.VITE_GEMINI_API_KEY) ||
+    (typeof process !== 'undefined' && (process.env?.VITE_GEMINI_API_KEY || process.env?.GEMINI_API_KEY));
 
   if (!apiKey) {
     return {
