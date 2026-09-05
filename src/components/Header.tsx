@@ -105,7 +105,13 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
               </span>
-              <span>Offline Mode ({queuedCount} {queuedCount === 1 ? 'report' : 'reports'} queued)</span>
+              <span>
+                {queuedCount === 1
+                  ? 'Offline Mode: 1 report waiting to sync'
+                  : queuedCount > 1
+                  ? `Offline Mode: ${queuedCount} reports waiting to sync`
+                  : 'Offline Mode (0 reports queued)'}
+              </span>
               {isOnline && (
                 <button
                   id="btn-manual-sync-now"

@@ -5,7 +5,7 @@
 
 import { OfflineQueuedReport, CitizenReport, RiskAssessment } from '../types';
 
-const DB_NAME = 'NER_Landslide_Intelligence_Offline_DB';
+const DB_NAME = 'NER_Offline_DB';
 const DB_VERSION = 1;
 
 const STORES = {

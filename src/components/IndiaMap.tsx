@@ -100,7 +100,9 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
         return {
           type: 'raster' as const,
           tiles: [
-            'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+            'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
           ],
           tileSize: 256,
           attribution: '&copy; OpenStreetMap contributors'
@@ -108,14 +110,14 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     }
   };
 
-  // Initialize MapLibre GL with North Eastern Region as default focus
+  // Initialize MapLibre GL with North Eastern Region as default focus (Center: [25.6747, 94.1105], Zoom: 8)
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
     // Default coordinates: Kohima / Nagaland (NER Focus)
     const initialLat = selectedLocation ? selectedLocation.latitude : 25.6747;
     const initialLon = selectedLocation ? selectedLocation.longitude : 94.1105;
-    const initialZoom = selectedLocation ? 9.2 : 9.0;
+    const initialZoom = 8;
 
     const sourceConfig = getBasemapSource(basemap);
 
@@ -370,8 +372,8 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
   const focusNER = () => {
     if (!mapRef.current) return;
     mapRef.current.flyTo({
-      center: [93.8, 25.6],
-      zoom: 8.5,
+      center: [94.1105, 25.6747],
+      zoom: 8,
       duration: 1500
     });
   };

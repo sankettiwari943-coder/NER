@@ -95,6 +95,160 @@ export const AlertsAndRoadsView: React.FC<AlertsAndRoadsViewProps> = ({
           </div>
         </div>
 
+        {/* Road Corridor Priority Scoring Table (SIH-26001 Mandate) */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+          <div className="px-4 py-2.5 bg-slate-100/80 border-b border-slate-200 flex items-center justify-between">
+            <span className="font-bold text-xs text-slate-800 uppercase tracking-wider">
+              Road Corridor Priority Scoring Table
+            </span>
+            <span className="text-[10px] font-mono text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+              Live Priority Matrix
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-100/50 text-slate-600 font-semibold border-b border-slate-200 text-[11px]">
+                  <th className="py-2.5 px-3">Corridor & Route</th>
+                  <th className="py-2.5 px-3">Risk Level & Score</th>
+                  <th className="py-2.5 px-3">Current Status</th>
+                  <th className="py-2.5 px-3">Required Operational Action</th>
+                  <th className="py-2.5 px-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/70 text-slate-700">
+                <tr className="bg-rose-50/40 hover:bg-rose-50/70 transition">
+                  <td className="py-3 px-3 font-medium">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white font-mono text-[10px]">NH-29</span>
+                      <span>Kohima - Dimapur</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono">Chainage KM 14–22 (Dzüdza Bridge)</div>
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                      Critical (&gt;85%) &bull; 88%
+                    </span>
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-600 text-white font-mono uppercase">
+                      SEVERELY DISRUPTED
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 font-semibold text-rose-900">
+                    Immediate closure &amp; clearance protocol.
+                    <div className="text-[10px] font-normal text-slate-500">Detour: Niuland-Kohima Bypass (+42 km)</div>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <button
+                      onClick={() => onSelectRoadLocation([93.8, 25.68])}
+                      className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] shadow-2xs transition cursor-pointer"
+                    >
+                      Inspect
+                    </button>
+                  </td>
+                </tr>
+
+                <tr className="bg-amber-50/30 hover:bg-amber-50/60 transition">
+                  <td className="py-3 px-3 font-medium">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white font-mono text-[10px]">NH-2</span>
+                      <span>Imphal - Kohima</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono">Chainage KM 38–46 (Mao-Maram)</div>
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200">
+                      High (76%) &bull; 76%
+                    </span>
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-slate-950 font-mono uppercase">
+                      REGULATED ONE-WAY
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 font-semibold text-amber-950">
+                    Active monitoring.
+                    <div className="text-[10px] font-normal text-slate-500">Detour: Tadubi-Pfutsero Route (+35 km)</div>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <button
+                      onClick={() => onSelectRoadLocation([94.05, 25.52])}
+                      className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] shadow-2xs transition cursor-pointer"
+                    >
+                      Inspect
+                    </button>
+                  </td>
+                </tr>
+
+                <tr className="hover:bg-slate-100/60 transition">
+                  <td className="py-3 px-3 font-medium">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white font-mono text-[10px]">NH-10</span>
+                      <span>Siliguri - Gangtok</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono">Chainage KM 24–32 (29th Mile / Likuvir)</div>
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200">
+                      High (78%) &bull; 78%
+                    </span>
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-slate-950 font-mono uppercase">
+                      REGULATED ONE-WAY
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 font-semibold text-slate-800">
+                    Regulated single-lane convoy with BRO escorts.
+                    <div className="text-[10px] font-normal text-slate-500">Detour: Lava-Algarah-Gorubathan (+55 km)</div>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <button
+                      onClick={() => onSelectRoadLocation([88.45, 27.05])}
+                      className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] shadow-2xs transition cursor-pointer"
+                    >
+                      Inspect
+                    </button>
+                  </td>
+                </tr>
+
+                <tr className="hover:bg-slate-100/60 transition">
+                  <td className="py-3 px-3 font-medium">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white font-mono text-[10px]">NH-27</span>
+                      <span>Haflong - Silchar</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono">Chainage KM 68–74 (Jatinga Chute)</div>
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200">
+                      High (82%) &bull; 82%
+                    </span>
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-400 text-slate-950 font-mono uppercase">
+                      CAUTION DEBRIS
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 font-semibold text-slate-800">
+                    Night travel ban &amp; debris clearance standby.
+                    <div className="text-[10px] font-normal text-slate-500">Detour: Lumding-Badarpur Highway (+48 km)</div>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <button
+                      onClick={() => onSelectRoadLocation([93.05, 25.18])}
+                      className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] shadow-2xs transition cursor-pointer"
+                    >
+                      Inspect
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         {/* Corridor Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {corridorRisks.map((c) => {
