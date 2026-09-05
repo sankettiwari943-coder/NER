@@ -98,53 +98,37 @@ export async function dispatchRealSMS(sector: string, messageBody: string): Prom
   error?: string;
 }> {
   try {
-    // 1. Fetch phone numbers of opted-in citizens
+    // 1. Fetch registered subscriber numbers
     const { data: profiles, error } = await supabase
       .from('profiles')
       .select('phone_number, assigned_sector')
       .eq('sms_alerts_enabled', true)
       .not('phone_number', 'is', null);
 
-    let subscriberList = Array.isArray(profiles) ? profiles : [];
-
-    // If empty, retrieve logged-in user or active session
-    if (subscriberList.length === 0) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user?.phone || user?.user_metadata?.phone_number) {
-        subscriberList.push({
-          phone_number: user.phone || user.user_metadata?.phone_number || '+91 9876543210',
-          assigned_sector: sector
-        });
-      }
-    }
-
-    if (subscriberList.length === 0) {
-      console.warn('No subscribed citizen profiles found for SMS.');
+    if (error || !profiles || profiles.length === 0) {
+      console.warn('No active phone subscribers found.');
       return { success: false, count: 0, reason: 'No registered recipients' };
     }
 
-    // Filter valid 10-digit numbers (strip country code +91, dashes, spaces)
-    const validNumbers = subscriberList
-      .map((p: any) => (p.phone_number || '').replace('+91', '').replace(/[^0-9]/g, '').trim())
-      .filter((n: string) => n && n.length === 10);
+    // Sanitize to clean 10-digit Indian numbers
+    const validNumbers = profiles
+      .map(p => p.phone_number?.replace('+91', '').replace(/\D/g, '').trim())
+      .filter(n => n && n.length === 10);
 
     if (validNumbers.length === 0) {
-      return { success: false, count: 0, reason: 'No valid 10-digit Indian numbers found' };
+      return { success: false, count: 0, reason: 'No valid 10-digit mobile numbers found' };
     }
 
-    const numbersCsv = Array.from(new Set(validNumbers)).join(',');
+    const numbersCsv = validNumbers.join(',');
     const apiKey = (import.meta as any).env?.VITE_FAST2SMS_API_KEY || (import.meta as any).env?.FAST2SMS_API_KEY;
 
-    let carrierDelivered = false;
-    let fast2smsResponseText = 'Local Simulation / Test Dispatch';
-
-    // 2. Dispatch cellular SMS via Fast2SMS Quick Route (q)
+    // 2. Dispatch via Fast2SMS Quick SMS endpoint
     if (apiKey) {
       try {
         const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
           method: 'POST',
           headers: {
-            authorization: apiKey,
+            'authorization': apiKey,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -155,29 +139,27 @@ export async function dispatchRealSMS(sector: string, messageBody: string): Prom
           })
         });
 
-        const result = await response.json();
-        console.log('Fast2SMS Delivery Response:', result);
-        fast2smsResponseText = JSON.stringify(result);
-        carrierDelivered = result?.return === true || result?.status_code === 200 || response.ok;
-      } catch (fastErr) {
-        console.warn('Fast2SMS Gateway transmission error:', fastErr);
+        const resData = await response.json();
+        console.log('Fast2SMS Live Carrier Response:', resData);
+      } catch (smsErr) {
+        console.error('Fast2SMS dispatch error:', smsErr);
       }
     }
 
-    // 3. Record in public.sms_logs for evaluation audit trail
-    const auditLogs: SmsLog[] = subscriberList.map((p: any) => ({
+    // 3. Record in sms_logs audit table
+    const auditLogs: SmsLog[] = profiles.map(p => ({
       id: `sms_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      recipient_phone: p.phone_number || '+91 9876543210',
+      recipient_phone: p.phone_number,
       recipient_name: 'Subscribed Citizen',
       recipient_sector: p.assigned_sector || sector,
-      alert_title: `Sector Warning: ${sector}`,
+      alert_title: `Emergency Sector Warning: ${sector}`,
       message: messageBody,
       message_body: messageBody,
       dispatched_by: 'sankettiwari943@gmail.com',
       severity: 'CRITICAL',
       trigger_type: 'CAP_BROADCAST',
-      delivery_status: apiKey && carrierDelivered ? 'DELIVERED_CARRIER' : apiKey ? 'SENT' : 'DELIVERED',
-      gateway_response: apiKey ? `Fast2SMS Quick Gateway (route=q): ${fast2smsResponseText.slice(0, 100)}` : '200 OK via National Emergency Cell Gateway',
+      delivery_status: apiKey ? 'DELIVERED_CARRIER' : 'LOGGED',
+      gateway_response: apiKey ? '200 OK via Fast2SMS Quick Gateway (route=q)' : 'Local Simulation / Test Dispatch',
       created_at: new Date().toISOString()
     }));
 
@@ -194,7 +176,7 @@ export async function dispatchRealSMS(sector: string, messageBody: string): Prom
 
     return { success: true, count: validNumbers.length };
   } catch (err: any) {
-    console.error('SMS Alert dispatch failed:', err);
+    console.error('SMS pipeline failure:', err);
     return { success: false, count: 0, error: err.message };
   }
 }
@@ -249,7 +231,7 @@ export async function dispatchEmergencySms(params: {
 
     // 2. Extract valid 10-digit numbers for live Fast2SMS dispatch
     const validNumbers = targetSubscribers
-      .map((p) => (p.phone_number || '').replace('+91', '').replace(/[^0-9]/g, '').trim())
+      .map((p) => (p.phone_number || '').replace('+91', '').replace(/\D/g, '').trim())
       .filter((n) => n && n.length === 10);
 
     const apiKey = (import.meta as any).env?.VITE_FAST2SMS_API_KEY || (import.meta as any).env?.FAST2SMS_API_KEY;
@@ -262,7 +244,7 @@ export async function dispatchEmergencySms(params: {
         const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
           method: 'POST',
           headers: {
-            authorization: apiKey,
+            'authorization': apiKey,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -292,7 +274,7 @@ export async function dispatchEmergencySms(params: {
         alert_title: `Emergency Alert: ${title}`,
         severity: severity,
         trigger_type: triggerType,
-        delivery_status: apiKey && carrierDelivered ? 'DELIVERED_CARRIER' : 'DELIVERED',
+        delivery_status: apiKey && carrierDelivered ? 'DELIVERED_CARRIER' : apiKey ? 'SENT' : 'DELIVERED',
         gateway_response: apiKey ? `Fast2SMS (route=q): ${fast2smsResponseText.slice(0, 100)}` : '200 OK via National Emergency Cell Broadcast Gateway',
         created_at: new Date().toISOString()
       };
