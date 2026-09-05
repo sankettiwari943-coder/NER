@@ -112,6 +112,18 @@ const AppContent: React.FC = () => {
     }
   }, [user]);
 
+  // Auto-redirect away from admin tab if user is not sankettiwari943@gmail.com
+  useEffect(() => {
+    const isExplicitAdmin = Boolean(
+      user &&
+      user.email &&
+      (user.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim() || user.email === 'sankettiwari943@gmail.com')
+    );
+    if (currentTab === 'admin' && !isExplicitAdmin) {
+      setCurrentTab('map');
+    }
+  }, [user, currentTab]);
+
   // Handle selection of arbitrary coordinates anywhere on the India Map
   const handleSelectArbitraryCoordinates = async (lat: number, lon: number) => {
     try {
@@ -163,13 +175,19 @@ const AppContent: React.FC = () => {
     setCurrentTab('map');
   };
 
+  const isExplicitAdmin = Boolean(
+    user &&
+    user.email &&
+    (user.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim() || user.email === 'sankettiwari943@gmail.com')
+  );
+
   return (
     <div className="min-h-screen bg-[#f8fafc] text-[#1e293b] flex flex-col font-sans selection:bg-indigo-500/20 selection:text-indigo-900">
       {/* Top Header */}
       <Header
         currentTab={currentTab}
         onSelectTab={(tab) => {
-          if (tab === 'admin' && !isAdmin) {
+          if (tab === 'admin' && !isExplicitAdmin) {
             setIsAuthModalOpen(true);
             return;
           }
@@ -234,7 +252,7 @@ const AppContent: React.FC = () => {
         )}
 
         {currentTab === 'admin' && (
-          isAdmin ? (
+          isExplicitAdmin ? (
             <AdminDashboard
               reports={reports}
               alerts={alerts}
