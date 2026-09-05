@@ -15,6 +15,8 @@ import { EvidenceRagView } from './components/EvidenceRagView';
 import { AiCopilotView } from './components/AiCopilotView';
 import { CitizenReportModal } from './components/CitizenReportModal';
 import { AuthModal } from './components/AuthModal';
+import { ShieldCheck, Lock } from 'lucide-react';
+import { ADMIN_EMAIL } from './lib/supabase';
 
 import {
   LocationPoint,
@@ -30,7 +32,7 @@ import { api } from './services/api';
 import { CURATED_INDIA_LOCATIONS } from '../server/locations';
 
 const AppContent: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
 
   const [currentTab, setCurrentTab] = useState<string>('map');
   const [selectedLocation, setSelectedLocation] = useState<LocationPoint>(CURATED_INDIA_LOCATIONS[0]);
@@ -119,11 +121,11 @@ const AppContent: React.FC = () => {
         name: rev.name,
         district: rev.district,
         state: rev.state,
-        region: 'India',
+        region: 'Other',
         latitude: lat,
         longitude: lon,
         elevationM: 1200,
-        landslideZoneCategory: 'Geotechnical Assessment Point',
+        landslideZoneCategory: 'Moderate Susceptibility',
         criticalHighways: ['Regional Highway']
       };
       setSelectedLocation(customLoc);
@@ -133,11 +135,11 @@ const AppContent: React.FC = () => {
         name: `Sector ${lat.toFixed(3)}°N, ${lon.toFixed(3)}°E`,
         district: 'Regional District',
         state: 'India',
-        region: 'India',
+        region: 'Other',
         latitude: lat,
         longitude: lon,
         elevationM: 1000,
-        landslideZoneCategory: 'Custom Evaluation Sector',
+        landslideZoneCategory: 'Moderate Susceptibility',
         criticalHighways: []
       };
       setSelectedLocation(customLoc);
@@ -167,7 +169,7 @@ const AppContent: React.FC = () => {
       <Header
         currentTab={currentTab}
         onSelectTab={(tab) => {
-          if (tab === 'admin' && user?.role !== 'ADMIN') {
+          if (tab === 'admin' && !isAdmin) {
             setIsAuthModalOpen(true);
             return;
           }
@@ -232,14 +234,35 @@ const AppContent: React.FC = () => {
         )}
 
         {currentTab === 'admin' && (
-          <AdminDashboard
-            reports={reports}
-            alerts={alerts}
-            onRefreshData={() => {
-              refreshLocationData(selectedLocation);
-              refreshGlobalData();
-            }}
-          />
+          isAdmin ? (
+            <AdminDashboard
+              reports={reports}
+              alerts={alerts}
+              onRefreshData={() => {
+                refreshLocationData(selectedLocation);
+                refreshGlobalData();
+              }}
+            />
+          ) : (
+            <div className="max-w-xl mx-auto my-16 p-8 bg-white border border-rose-200 rounded-2xl text-center shadow-xl space-y-4">
+              <div className="w-14 h-14 bg-rose-50 border border-rose-200 text-rose-600 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
+                <Lock className="w-7 h-7" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Restricted Disaster Authority Zone</h2>
+                <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                  The Command &amp; Verification Console and CAP broadcast engine are strictly restricted to authorized NDMA administrator (<code className="bg-slate-100 text-rose-700 px-1.5 py-0.5 rounded font-mono font-bold">{ADMIN_EMAIL}</code>).
+                </p>
+              </div>
+              <button
+                id="btn-admin-gate-signin"
+                onClick={() => setIsAuthModalOpen(true)}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-sm transition cursor-pointer"
+              >
+                Sign In as Verified Administrator
+              </button>
+            </div>
+          )
         )}
       </main>
 

@@ -301,22 +301,33 @@ export const Header: React.FC<HeaderProps> = ({
             );
           })}
 
-          {/* Admin Command Tab (Authority Unlocked) */}
+          {/* Admin Command Tab (Strictly Authority Protected) */}
           <button
             id="nav-admin"
-            onClick={() => onSelectTab('admin')}
+            onClick={() => {
+              if (!isAdmin) {
+                onOpenAuthModal();
+              } else {
+                onSelectTab('admin');
+              }
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition cursor-pointer ${
               currentTab === 'admin'
                 ? 'bg-rose-50 text-rose-700 font-semibold border border-rose-200 shadow-2xs'
                 : isAdmin
                 ? 'text-rose-600 hover:bg-rose-50/70 font-semibold'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
             }`}
+            title={isAdmin ? 'Disaster Authority Command Center' : 'Restricted to NDMA Authority (sankettiwari943@gmail.com)'}
           >
-            <ShieldCheck className="w-4 h-4 text-rose-600" />
+            <ShieldCheck className={`w-4 h-4 ${isAdmin ? 'text-rose-600' : 'text-slate-400'}`} />
             <span>Admin</span>
-            {isAdmin && (
-              <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+            {isAdmin ? (
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" title="Admin Active"></span>
+            ) : (
+              <span className="text-[10px] font-mono bg-slate-100 text-slate-500 px-1 py-0.2 rounded border border-slate-200">
+                🔒 Locked
+              </span>
             )}
           </button>
         </div>
@@ -397,17 +408,30 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="mobile-nav-admin"
             onClick={() => {
-              onSelectTab('admin');
               setMobileMenuOpen(false);
+              if (!isAdmin) {
+                onOpenAuthModal();
+              } else {
+                onSelectTab('admin');
+              }
             }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left transition cursor-pointer ${
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium text-left transition cursor-pointer ${
               currentTab === 'admin'
                 ? 'bg-rose-50 text-rose-700 font-semibold border border-rose-200'
-                : 'text-rose-700 hover:bg-rose-50/70 font-semibold'
+                : isAdmin
+                ? 'text-rose-700 hover:bg-rose-50/70 font-semibold'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <ShieldCheck className="w-5 h-5 text-rose-600" />
-            <span>Admin Operations</span>
+            <div className="flex items-center gap-3">
+              <ShieldCheck className={`w-5 h-5 ${isAdmin ? 'text-rose-600' : 'text-slate-400'}`} />
+              <span>Admin Operations</span>
+            </div>
+            {!isAdmin && (
+              <span className="text-[10px] font-mono bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">
+                🔒 Locked
+              </span>
+            )}
           </button>
 
           <div className="pt-2 border-t border-slate-200 flex items-center justify-between">

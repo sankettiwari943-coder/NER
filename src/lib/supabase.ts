@@ -70,10 +70,12 @@ class SupabaseAuthClient {
       const raw = localStorage.getItem(SESSION_STORAGE_KEY);
       if (raw) {
         const parsed: SupabaseSession = JSON.parse(raw);
-        if (parsed?.user) {
-          // Normalize role
-          parsed.user.role = this.determineRole(parsed.user.email, parsed.user.role);
+        if (parsed?.user?.email) {
+          // Strictly enforce that only ADMIN_EMAIL has admin role
+          parsed.user.role = this.determineRole(parsed.user.email);
           this.currentSession = parsed;
+        } else {
+          this.currentSession = null;
         }
       }
     } catch {
@@ -105,13 +107,14 @@ class SupabaseAuthClient {
     });
   }
 
-  public determineRole(email?: string, requestedRole?: string): 'admin' | 'citizen' {
+  /**
+   * Strictly determines role: ONLY sankettiwari943@gmail.com is granted 'admin' role.
+   * All other users are assigned 'citizen' role.
+   */
+  public determineRole(email?: string): 'admin' | 'citizen' {
     if (!email) return 'citizen';
     const em = email.toLowerCase().trim();
-    if (em === ADMIN_EMAIL.toLowerCase() || em.includes('admin') || em.includes('ddma') || em.includes('ndma')) {
-      return 'admin';
-    }
-    if (requestedRole && (requestedRole.toLowerCase() === 'admin' || requestedRole.toUpperCase() === 'ADMIN')) {
+    if (em === ADMIN_EMAIL.toLowerCase()) {
       return 'admin';
     }
     return 'citizen';
@@ -149,6 +152,7 @@ class SupabaseAuthClient {
    */
   public async signInWithPassword(credentials: { email: string; password: string }): Promise<AuthResponse> {
     const { email, password } = credentials;
+    const role = this.determineRole(email);
 
     // Try real Supabase endpoint
     if (this.url && this.anonKey) {
@@ -164,13 +168,12 @@ class SupabaseAuthClient {
 
         if (res.ok) {
           const json = await res.json();
-          const role = this.determineRole(email, json.user?.user_metadata?.role);
           const user: SupabaseUser = {
             id: json.user?.id || `usr_${Date.now()}`,
             email: json.user?.email || email,
-            full_name: json.user?.user_metadata?.full_name || (email === ADMIN_EMAIL ? 'Sanket Tiwari (NDMA Authority)' : email.split('@')[0]),
+            full_name: json.user?.user_metadata?.full_name || (role === 'admin' ? 'Sanket Tiwari (NDMA Authority)' : email.split('@')[0]),
             role,
-            organization: json.user?.user_metadata?.organization || (role === 'admin' ? 'DDMA / NDMA Command' : 'Citizen Field Observer'),
+            organization: json.user?.user_metadata?.organization || (role === 'admin' ? 'National Disaster Management Authority (NDMA)' : 'Citizen Field Observer'),
             created_at: json.user?.created_at || new Date().toISOString(),
           };
 
@@ -185,18 +188,17 @@ class SupabaseAuthClient {
           return { data: { user, session }, error: null };
         }
       } catch (fetchErr) {
-        console.warn('Remote Supabase connection unreachable, using offline fallback:', fetchErr);
+        console.warn('Remote Supabase connection unreachable, using local authentication:', fetchErr);
       }
     }
 
     // Local / Offline fallback authentication
-    const role = this.determineRole(email);
     const user: SupabaseUser = {
       id: `usr_${Date.now().toString(36)}`,
       email,
-      full_name: email === ADMIN_EMAIL ? 'Sanket Tiwari (NDMA Authority)' : role === 'admin' ? 'DDMA Official' : email.split('@')[0],
+      full_name: role === 'admin' ? 'Sanket Tiwari (NDMA Authority)' : email.split('@')[0],
       role,
-      organization: role === 'admin' ? 'DDMA Kohima / NSDMA' : 'NER Citizen Watch',
+      organization: role === 'admin' ? 'National Disaster Management Authority (NDMA)' : 'NER Citizen Watch',
       created_at: new Date().toISOString(),
     };
 
@@ -227,9 +229,8 @@ class SupabaseAuthClient {
     };
   }): Promise<AuthResponse> {
     const { email, password, options } = params;
-    const requestedRole = options?.data?.role || 'citizen';
-    const role = this.determineRole(email, requestedRole);
-    const fullName = options?.data?.full_name || (email === ADMIN_EMAIL ? 'Sanket Tiwari (NDMA Authority)' : email.split('@')[0]);
+    const role = this.determineRole(email);
+    const fullName = options?.data?.full_name || (role === 'admin' ? 'Sanket Tiwari (NDMA Authority)' : email.split('@')[0]);
 
     if (this.url && this.anonKey) {
       try {
@@ -258,7 +259,7 @@ class SupabaseAuthClient {
             email: json.user?.email || email,
             full_name: fullName,
             role,
-            organization: options?.data?.organization || (role === 'admin' ? 'NDMA Command' : 'Citizen Field Watch'),
+            organization: options?.data?.organization || (role === 'admin' ? 'National Disaster Management Authority (NDMA)' : 'Citizen Field Watch'),
             created_at: json.user?.created_at || new Date().toISOString(),
           };
 
@@ -282,7 +283,7 @@ class SupabaseAuthClient {
       email,
       full_name: fullName,
       role,
-      organization: options?.data?.organization || (role === 'admin' ? 'NDMA Command' : 'Citizen Field Watch'),
+      organization: options?.data?.organization || (role === 'admin' ? 'National Disaster Management Authority (NDMA)' : 'Citizen Field Watch'),
       created_at: new Date().toISOString(),
     };
 
@@ -302,11 +303,11 @@ class SupabaseAuthClient {
    */
   public async signInAsDemoRole(targetRole: 'admin' | 'citizen'): Promise<AuthResponse> {
     const isAdm = targetRole === 'admin';
-    const email = isAdm ? ADMIN_EMAIL : 'field.scout@ner-landslide.in';
+    const email = isAdm ? ADMIN_EMAIL : 'citizen.scout@ner-landslide.in';
     const user: SupabaseUser = {
       id: isAdm ? 'usr_admin_sanket' : 'usr_citizen_scout',
       email,
-      full_name: isAdm ? 'Sanket Tiwari (NDMA Authority)' : 'Tsering Dorjee (Field Scout)',
+      full_name: isAdm ? 'Sanket Tiwari (NDMA Authority)' : 'Tsering Dorjee (Citizen Scout)',
       role: isAdm ? 'admin' : 'citizen',
       organization: isAdm ? 'National Disaster Management Authority (NDMA)' : 'Citizen Scout Network',
       created_at: new Date().toISOString(),

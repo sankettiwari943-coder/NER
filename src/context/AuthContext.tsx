@@ -1,11 +1,9 @@
 /**
  * Supabase Role-Based Authentication Context & Provider (SIH-26001 Aligned)
- * Connects directly to Supabase client with local session management and 1-click demo roles.
- *
- * Target Credentials:
- * - Supabase URL: https://jizqmqwxnynijwnmmklk.supabase.co
- * - Admin: sankettiwari943@gmail.com (Role: 'admin')
- * - Default Role: 'citizen'
+ * Strict Security Gate:
+ * - Admin Role & Access restricted exclusively to: sankettiwari943@gmail.com
+ * - Default State on initial load: user = null, isAdmin = false
+ * - Default Role for all other users: 'citizen'
  */
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
@@ -27,8 +25,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function mapSupabaseUserToUser(sbUser: SupabaseUser | null): User | null {
-  if (!sbUser) return null;
-  const isAdm = sbUser.role === 'admin' || sbUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  if (!sbUser || !sbUser.email) return null;
+  const isAdm = sbUser.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim();
   return {
     id: sbUser.id,
     email: sbUser.email,
@@ -41,17 +39,20 @@ function mapSupabaseUserToUser(sbUser: SupabaseUser | null): User | null {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Default state on first load must be strictly null / unauthenticated
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // 1. Initial Session Check
+    // 1. Check existing persisted session
     supabase.auth.getSession().then(({ data }) => {
       const u = mapSupabaseUserToUser(data.session?.user || null);
       setUser(u);
       if (data.session?.access_token) {
         api.setToken(data.session.access_token);
+      } else {
+        api.setToken(null);
       }
       setLoading(false);
     });
@@ -158,7 +159,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const isAdmin = user?.role === 'ADMIN' || user?.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  // Strictly evaluated: Only sankettiwari943@gmail.com is Admin
+  const isAdmin = Boolean(
+    user &&
+    user.email &&
+    user.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim() &&
+    user.role === 'ADMIN'
+  );
 
   return (
     <AuthContext.Provider
