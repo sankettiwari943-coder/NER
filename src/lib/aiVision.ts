@@ -1,8 +1,6 @@
-// Direct fallback key ensures runtime execution regardless of bundler env injection
 const GEMINI_KEY =
-  (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.GEMINI_API_KEY)) ||
-  (typeof process !== 'undefined' && (process.env?.VITE_GEMINI_API_KEY || process.env?.GEMINI_API_KEY)) ||
-  (typeof window !== 'undefined' && (window as any).__ENV__?.VITE_GEMINI_API_KEY) ||
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
+  (typeof process !== 'undefined' && process.env?.VITE_GEMINI_API_KEY) ||
   '';
 
 export interface VisionResult {
@@ -13,8 +11,37 @@ export interface VisionResult {
 
 export type AiVisionResult = VisionResult;
 
-export async function analyzeFieldImage(imageBase64: string): Promise<VisionResult> {
-  if (!imageBase64) {
+// Convert any image URL, Blob, or path into a base64 string
+async function urlToBase64(imageUrl: string): Promise<string> {
+  if (imageUrl.startsWith('data:image')) {
+    return imageUrl.replace(/^data:image\/[a-zA-Z0-9.+_-]+;base64,/i, '');
+  }
+
+  // If it is not a remote URL, blob URL, or relative path, assume raw base64
+  if (
+    !imageUrl.startsWith('http://') &&
+    !imageUrl.startsWith('https://') &&
+    !imageUrl.startsWith('blob:') &&
+    !imageUrl.startsWith('/')
+  ) {
+    return imageUrl.replace(/^data:image\/[a-zA-Z0-9.+_-]+;base64,/i, '');
+  }
+
+  const response = await fetch(imageUrl);
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      resolve(result.replace(/^data:image\/[a-zA-Z0-9.+_-]+;base64,/i, ''));
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function analyzeFieldImage(imageUrlOrBase64: string): Promise<VisionResult> {
+  if (!imageUrlOrBase64) {
     return {
       isValidTerrain: false,
       statusBadge: 'IRRELEVANT MEDIA DETECTED',
@@ -22,19 +49,32 @@ export async function analyzeFieldImage(imageBase64: string): Promise<VisionResu
     };
   }
 
-  const activeKey = GEMINI_KEY && GEMINI_KEY.trim() !== '' ? GEMINI_KEY.trim() : null;
-
-  if (!activeKey) {
-    console.warn('VITE_GEMINI_API_KEY is not defined in environment. Applying geotechnical validation fallback.');
-    return {
-      isValidTerrain: true,
-      statusBadge: 'FIELD FAILURE VERIFIED',
-      assessmentText: 'AI VISION AUDIT: Authentic terrain failure confirmed. Visible mass movement and slope destabilization detected. Threat Level: CRITICAL. Recommended Action: Coordinate immediate road clearance.'
-    };
-  }
-
   try {
-    const cleanBase64 = imageBase64.replace(/^data:image\/[a-z0-9.+_-]+;base64,/, '');
+    const cleanBase64 = await urlToBase64(imageUrlOrBase64);
+
+    const promptText = `You are an expert geotechnical disaster auditor for the Geological Survey of India (GSI) and NDMA.
+Analyze this citizen-submitted field report photo.
+
+STRICT CLASSIFICATION RULES:
+1. "IRRELEVANT MEDIA DETECTED":
+   - The photo contains a human face, portrait, selfie, indoor setting, vehicle cabin, furniture, screenshot, document, or non-disaster scene.
+   - Return this exact JSON:
+   {
+     "isValidTerrain": false,
+     "statusBadge": "IRRELEVANT MEDIA DETECTED",
+     "assessmentText": "AI VISION AUDIT: Non-geotechnical media detected (human subject / indoor / personal photo). No terrain displacement or rockfall identified. Submission rejected."
+   }
+
+2. "FIELD FAILURE VERIFIED":
+   - The photo shows genuine outdoor geological failure: rockslide, slope scarp, mudflow, road debris washout, or emergency crews working on landslide debris.
+   - Return this exact JSON:
+   {
+     "isValidTerrain": true,
+     "statusBadge": "FIELD FAILURE VERIFIED",
+     "assessmentText": "AI VISION AUDIT: Authentic terrain failure confirmed. Visible mass movement and slope destabilization detected. Threat Level: CRITICAL. Recommended Action: Coordinate immediate corridor clearance."
+   }
+
+Output ONLY valid JSON. Do not include markdown ticks, notes, or backticks.`;
 
     const response = await fetch(
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
@@ -42,36 +82,13 @@ export async function analyzeFieldImage(imageBase64: string): Promise<VisionResu
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-goog-api-key': activeKey
+          'x-goog-api-key': GEMINI_KEY.trim()
         },
         body: JSON.stringify({
           contents: [
             {
               parts: [
-                {
-                  text: `You are an expert geotechnical disaster auditor for the Geological Survey of India (GSI) and NDMA evaluating citizen hazard evidence.
-
-INSPECTION RULES:
-1. "IRRELEVANT MEDIA DETECTED":
-   - If the image contains a human face, selfie, portrait, vehicle interior (seats, steering wheel, roof lining), indoor room, screenshot, text document, meme, or animal.
-   - Return this exact JSON:
-   {
-     "isValidTerrain": false,
-     "statusBadge": "IRRELEVANT MEDIA DETECTED",
-     "assessmentText": "AI VISION AUDIT: The uploaded imagery contains non-geotechnical subject matter (human subject / vehicle interior) rather than outdoor terrain. Unable to verify slope displacement or soil erosion. Recommended Action: Reject submission."
-   }
-
-2. "FIELD FAILURE VERIFIED":
-   - If the image authenticates outdoor mountain slope failure, rockfall, mudflow, road blockage, tension crack scarps, or SDRF/NDRF rescue operations in disaster zones.
-   - Return this exact JSON:
-   {
-     "isValidTerrain": true,
-     "statusBadge": "FIELD FAILURE VERIFIED",
-     "assessmentText": "AI VISION AUDIT: Authentic terrain failure confirmed. Visible mass movement and slope destabilization detected. Threat Level: CRITICAL. Recommended Action: Coordinate immediate road clearance."
-   }
-
-Respond ONLY with valid JSON. Do not include markdown codeblocks or backticks.`
-                },
+                { text: promptText },
                 {
                   inline_data: {
                     mime_type: 'image/jpeg',
@@ -88,46 +105,43 @@ Respond ONLY with valid JSON. Do not include markdown codeblocks or backticks.`
     const data = await response.json();
 
     if (data.error) {
-      console.error('Gemini API returned an error:', data.error);
-      return {
-        isValidTerrain: false,
-        statusBadge: 'IRRELEVANT MEDIA DETECTED',
-        assessmentText: `Gemini Gateway Error: ${data.error.message}`
-      };
+      console.error('Gemini API Error:', data.error);
+      throw new Error(data.error.message);
     }
 
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-    const cleanJson = rawText.replace(/```json|```/g, '').trim();
+    const cleanJson = rawText.replace(/```json|```/gi, '').trim();
 
-    let parsed: any = null;
+    let parsed: any;
     try {
       parsed = JSON.parse(cleanJson);
     } catch {
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          parsed = JSON.parse(jsonMatch[0]);
-        } catch {}
+      const match = rawText.match(/\{[\s\S]*\}/);
+      if (match) {
+        parsed = JSON.parse(match[0]);
+      } else {
+        throw new Error('Failed to parse JSON response from Gemini');
       }
     }
 
-    if (parsed && typeof parsed === 'object') {
-      return {
-        isValidTerrain: Boolean(parsed.isValidTerrain),
-        statusBadge: (parsed.statusBadge === 'FIELD FAILURE VERIFIED' || parsed.isValidTerrain)
+    return {
+      isValidTerrain: Boolean(parsed.isValidTerrain),
+      statusBadge:
+        parsed.statusBadge === 'FIELD FAILURE VERIFIED'
           ? 'FIELD FAILURE VERIFIED'
           : 'IRRELEVANT MEDIA DETECTED',
-        assessmentText: parsed.assessmentText || rawText
-      };
-    }
-
-    return JSON.parse(cleanJson);
+      assessmentText:
+        parsed.assessmentText ||
+        'AI VISION AUDIT: Processed field imagery.'
+    };
   } catch (err: any) {
-    console.error('Vision inspection error:', err);
+    console.error('Vision inspection execution error:', err);
+    // Safe fallback defaults to rejecting suspicious or unverified media
     return {
       isValidTerrain: false,
       statusBadge: 'IRRELEVANT MEDIA DETECTED',
-      assessmentText: 'AI Vision analysis could not complete. Image flagged for manual review.'
+      assessmentText:
+        'AI VISION AUDIT: Unable to verify geological failure. Submission flagged for manual inspector review.'
     };
   }
 }

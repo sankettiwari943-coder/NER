@@ -243,13 +243,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       const formattedObservation = `[${visionResult.statusBadge}] ${visionResult.assessmentText}`;
 
-      if (selectedReport && selectedReport.id === report.id) {
-        setSelectedReport({
-          ...selectedReport,
+      setSelectedReport((prev: any) => {
+        if (!prev || prev.id !== report.id) return prev;
+        return {
+          ...prev,
           ai_status: visionResult.statusBadge,
           ai_observation: formattedObservation
-        });
-      }
+        };
+      });
 
       // 2. Persist to Supabase and API store
       try {
