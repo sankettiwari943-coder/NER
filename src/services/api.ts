@@ -1156,7 +1156,8 @@ class ApiService {
       const type = hazardType || report?.hazard_type || 'Landslide / Slope Failure';
       const desc = description || report?.description || '';
 
-      const observation = await analyzeFieldImage(img, type, desc);
+      const result = await analyzeFieldImage(img);
+      const observation = typeof result === 'string' ? result : `[${result.statusBadge}] ${result.assessmentText}`;
 
       if (report) {
         report.ai_observation = observation;

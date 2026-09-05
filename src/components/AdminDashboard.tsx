@@ -28,10 +28,11 @@ import {
   Smartphone,
   Check,
   BellRing
-} from 'lucide-react';
 import { CitizenReport, ReportStatusHistory, Alert, AnalyticsData, SystemHealthData, SmsLog } from '../types';
 import { api } from '../services/api';
 import { DEFAULT_SECTORS } from '../lib/smsService';
+import { analyzeFieldImage, AiVisionResult } from '../lib/aiVision';
+import { supabase } from '../lib/supabase';
 
 interface AdminDashboardProps {
   reports: CitizenReport[];
@@ -169,19 +170,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const [aiInspecting, setAiInspecting] = useState(false);
+  const [liveAiResults, setLiveAiResults] = useState<{ [reportId: string]: AiVisionResult }>({});
 
   const handleTriggerAiObserve = async (report: CitizenReport) => {
+    const rawImage = report.image_url || report.photo_url || report.photo || '';
+    if (!rawImage) return;
+
     setAiInspecting(true);
     try {
-      const res = await api.triggerAiObserve(
+      // 1. Perform direct multimodal vision inspection via Gemini API
+      const visionResult = await analyzeFieldImage(rawImage);
+
+      setLiveAiResults(prev => ({
+        ...prev,
+        [report.id]: visionResult
+      }));
+
+      const formattedObservation = `[${visionResult.statusBadge}] ${visionResult.assessmentText}`;
+
+      if (selectedReport && selectedReport.id === report.id) {
+        setSelectedReport({
+          ...selectedReport,
+          ai_observation: formattedObservation
+        });
+      }
+
+      // 2. Persist to Supabase and API store
+      try {
+        await supabase.from('reports').update({
+          ai_observation: formattedObservation,
+          updated_at: new Date().toISOString()
+        }).eq('id', report.id);
+      } catch (e) {
+        console.warn('Supabase update warning:', e);
+      }
+
+      await api.triggerAiObserve(
         report.id,
-        report.photo_url || report.image_url,
+        rawImage,
         report.hazard_type,
         report.description
       );
-      if (selectedReport && selectedReport.id === report.id) {
-        setSelectedReport({ ...selectedReport, ai_observation: res.observation });
-      }
+
       onRefreshData();
     } catch (err) {
       console.error('Failed to trigger AI observe:', err);
@@ -550,11 +580,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 {/* Photo View */}
-                {selectedReport.photo_url && (
+                {(selectedReport.photo_url || selectedReport.image_url || selectedReport.photo) && (
                   <div>
                     <div className="text-[11px] font-bold text-slate-500 mb-1">FIELD IMAGERY:</div>
                     <img
-                      src={selectedReport.photo_url}
+                      src={selectedReport.photo_url || selectedReport.image_url || selectedReport.photo}
                       alt="Incident Photo"
                       className="w-full max-h-56 object-cover rounded-lg border border-slate-200 shadow-2xs"
                     />
@@ -562,61 +592,81 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 )}
 
                 {/* AI Photo Observation */}
-                <div className={`border rounded-xl p-3.5 space-y-2 ${
-                  selectedReport.ai_observation?.includes('INVALID') || selectedReport.ai_observation?.includes('IRRELEVANT')
-                    ? 'bg-rose-50/80 border-rose-200'
-                    : selectedReport.ai_observation?.includes('AI VISION')
-                    ? 'bg-indigo-50/70 border-indigo-200'
-                    : 'bg-slate-50 border-slate-200'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900">
-                      <Bot className="w-4 h-4 text-indigo-600" />
-                      <span>Multimodal AI Vision Assessment</span>
-                    </div>
-                    {selectedReport.photo_url && (
-                      <button
-                        onClick={() => handleTriggerAiObserve(selectedReport)}
-                        disabled={aiInspecting}
-                        className="text-[10px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-2.5 py-1 rounded-md font-semibold transition cursor-pointer flex items-center gap-1 shadow-2xs"
-                      >
-                        {aiInspecting ? (
-                          <>
-                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            <span>Analyzing Imagery...</span>
-                          </>
-                        ) : (
-                          <span>{selectedReport.ai_observation ? 'Re-inspect with AI' : 'Inspect with AI'}</span>
-                        )}
-                      </button>
-                    )}
-                  </div>
+                {(() => {
+                  const currentLive = liveAiResults[selectedReport.id];
+                  const hasObservation = Boolean(selectedReport.ai_observation || currentLive);
+                  const isIrrelevant = currentLive
+                    ? currentLive.statusBadge === 'IRRELEVANT MEDIA DETECTED' || !currentLive.isValidTerrain
+                    : selectedReport.ai_observation?.includes('IRRELEVANT') || selectedReport.ai_observation?.includes('INVALID');
+                  const isVerified = currentLive
+                    ? currentLive.statusBadge === 'FIELD FAILURE VERIFIED' || currentLive.isValidTerrain
+                    : selectedReport.ai_observation?.includes('FIELD FAILURE VERIFIED') || (!isIrrelevant && hasObservation);
 
-                  {selectedReport.ai_observation ? (
-                    <div className="space-y-1.5">
-                      {selectedReport.ai_observation.includes('INVALID') || selectedReport.ai_observation.includes('IRRELEVANT') ? (
-                        <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 uppercase">
-                          <AlertTriangle className="w-3 h-3" />
-                          <span>Non-Field Media Detected</span>
+                  const assessmentText = currentLive
+                    ? currentLive.assessmentText
+                    : selectedReport.ai_observation?.replace(/^\[(FIELD FAILURE VERIFIED|IRRELEVANT MEDIA DETECTED)\]\s*/i, '') || selectedReport.ai_observation;
+
+                  const hasPhoto = Boolean(selectedReport.photo_url || selectedReport.image_url || selectedReport.photo);
+
+                  return (
+                    <div className={`border rounded-xl p-3.5 space-y-2.5 transition-all ${
+                      hasObservation
+                        ? isIrrelevant
+                          ? 'bg-rose-50/80 border-rose-200'
+                          : 'bg-emerald-50/80 border-emerald-200'
+                        : 'bg-slate-50 border-slate-200'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                          <Bot className={`w-4 h-4 ${hasObservation ? (isIrrelevant ? 'text-rose-600' : 'text-emerald-600') : 'text-indigo-600'}`} />
+                          <span>Multimodal AI Vision Assessment</span>
+                        </div>
+                        {hasPhoto && (
+                          <button
+                            id="btn-admin-reinspect-ai"
+                            onClick={() => handleTriggerAiObserve(selectedReport)}
+                            disabled={aiInspecting}
+                            className="text-[10px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-2.5 py-1 rounded-md font-semibold transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                          >
+                            {aiInspecting ? (
+                              <>
+                                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                <span>Inspecting with Gemini AI...</span>
+                              </>
+                            ) : (
+                              <span>{hasObservation ? 'Re-inspect with AI' : 'Inspect with AI'}</span>
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      {hasObservation ? (
+                        <div className="space-y-1.5">
+                          {isIrrelevant ? (
+                            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 uppercase tracking-wide">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>IRRELEVANT MEDIA DETECTED</span>
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 uppercase tracking-wide">
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              <span>FIELD FAILURE VERIFIED</span>
+                            </div>
+                          )}
+                          <div className="text-xs text-slate-800 leading-relaxed font-sans font-normal">
+                            {assessmentText}
+                          </div>
                         </div>
                       ) : (
-                        <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 uppercase">
-                          <CheckCircle className="w-3 h-3" />
-                          <span>Field Failure Verified</span>
+                        <div className="text-xs text-slate-500 italic">
+                          {hasPhoto
+                            ? 'Click "Inspect with AI" to query Gemini Multimodal Vision to inspect the uploaded field image.'
+                            : 'No field photo attached to run vision inspection.'}
                         </div>
                       )}
-                      <div className="text-xs text-slate-800 leading-relaxed font-sans font-normal">
-                        {selectedReport.ai_observation}
-                      </div>
                     </div>
-                  ) : (
-                    <div className="text-xs text-slate-500 italic">
-                      {selectedReport.photo_url
-                        ? 'Click "Inspect with AI" to run computer vision feature extraction on the field imagery.'
-                        : 'No field photo attached to run vision inspection.'}
-                    </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 {/* Description & Metadata */}
                 <div className="text-xs space-y-1 bg-slate-50 p-3 rounded-lg border border-slate-200 text-slate-700">
