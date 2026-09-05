@@ -28,9 +28,10 @@ import {
   Smartphone,
   Check,
   BellRing
+} from 'lucide-react';
 import { CitizenReport, ReportStatusHistory, Alert, AnalyticsData, SystemHealthData, SmsLog } from '../types';
 import { api } from '../services/api';
-import { DEFAULT_SECTORS } from '../lib/smsService';
+import { DEFAULT_SECTORS, dispatchRealSMS } from '../lib/smsService';
 import { analyzeFieldImage, AiVisionResult } from '../lib/aiVision';
 import { supabase } from '../lib/supabase';
 
@@ -62,6 +63,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [smsSectorFilter, setSmsSectorFilter] = useState<string>('ALL');
   const [isSendingDrillSms, setIsSendingDrillSms] = useState(false);
   const [drillSuccess, setDrillSuccess] = useState<string | null>(null);
+  const [isBroadcastingSms, setIsBroadcastingSms] = useState(false);
+  const [broadcastMessage, setBroadcastMessage] = useState<string | null>(null);
 
   // New Alert Form state
   const [showNewAlertModal, setShowNewAlertModal] = useState(false);
@@ -269,6 +272,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       onRefreshData();
     } catch (err) {
       console.error('Failed to resolve alert:', err);
+    }
+  };
+
+  const handleBroadcastEmergencySms = async (report: CitizenReport) => {
+    setIsBroadcastingSms(true);
+    try {
+      const sector = report.location_name || 'Kohima (NH-29)';
+      const msg = `[NDMA EMERGENCY ALERT - ${report.severity}] ${report.hazard_type} verified at ${sector}. Caution advised along vulnerable corridor chainages.`;
+      const res = await dispatchRealSMS(sector, msg);
+      if (res.success) {
+        setBroadcastMessage(`Emergency Fast2SMS dispatched to ${res.count} recipient(s) in ${sector}.`);
+      } else {
+        setBroadcastMessage(`SMS dispatch status: ${res.reason || res.error || 'Dispatched'}`);
+      }
+      await loadSmsLogs();
+      setTimeout(() => setBroadcastMessage(null), 5000);
+    } catch (err) {
+      console.error('Broadcast SMS error:', err);
+    } finally {
+      setIsBroadcastingSms(false);
     }
   };
 
@@ -734,6 +757,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500"
                     />
                   </div>
+
+                  {/* Broadcast Fast2SMS Feedback */}
+                  {broadcastMessage && (
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-lg text-xs font-semibold flex items-center gap-1.5 animate-in fade-in">
+                      <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>{broadcastMessage}</span>
+                    </div>
+                  )}
+
+                  {/* Broadcast Emergency Sector SMS Button */}
+                  <button
+                    id="btn-admin-broadcast-emergency-sms"
+                    onClick={() => handleBroadcastEmergencySms(selectedReport)}
+                    disabled={isBroadcastingSms || actionLoading}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs transition disabled:opacity-50 cursor-pointer"
+                  >
+                    <Radio className={`w-3.5 h-3.5 ${isBroadcastingSms ? 'animate-pulse' : ''}`} />
+                    <span>{isBroadcastingSms ? 'Transmitting Fast2SMS Carrier Alert...' : 'Broadcast Emergency Sector SMS'}</span>
+                  </button>
                 </div>
 
                 {/* Audit Status History */}
