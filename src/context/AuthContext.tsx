@@ -41,25 +41,46 @@ function mapSupabaseUserToUser(sbUser: SupabaseUser | null): User | null {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Default state on first load must be strictly null / unauthenticated
   const [user, setUser] = useState<User | null>(null);
-  const [role, setRole] = useState<string | null>(null);
+  const [role, setRole] = useState<'admin' | 'citizen' | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   const applyUserState = (u: User | null) => {
-    setUser(u);
-    setRole(u?.role || null);
-    setIsAdmin(Boolean(u && u.email && u.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim() && u.role === 'ADMIN'));
+    if (u && u.email) {
+      const isAdm = u.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim() && u.role === 'ADMIN';
+      setUser(u);
+      setRole(isAdm ? 'admin' : 'citizen');
+      setIsAdmin(isAdm);
+    } else {
+      setUser(null);
+      setRole(null);
+      setIsAdmin(false);
+    }
   };
 
   useEffect(() => {
-    // 1. Check existing persisted session
+    // Purge legacy mock keys from localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('ner_mock_user');
+        localStorage.removeItem('demo_user');
+        localStorage.removeItem('mock_admin_user');
+        localStorage.removeItem('sb_mock_session');
+      } catch {}
+    }
+
+    // 1. Check existing real persisted session
     supabase.auth.getSession().then(({ data }) => {
-      const u = mapSupabaseUserToUser(data.session?.user || null);
-      applyUserState(u);
-      if (data.session?.access_token) {
-        api.setToken(data.session.access_token);
+      const sessionUser = data.session?.user || null;
+      if (sessionUser && sessionUser.email) {
+        const u = mapSupabaseUserToUser(sessionUser);
+        applyUserState(u);
+        if (data.session?.access_token) {
+          api.setToken(data.session.access_token);
+        }
       } else {
+        applyUserState(null);
         api.setToken(null);
       }
       setLoading(false);
@@ -67,11 +88,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 2. Auth State Change Listener
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      const u = mapSupabaseUserToUser(session?.user || null);
-      applyUserState(u);
-      if (session?.access_token) {
-        api.setToken(session.access_token);
+      const sessionUser = session?.user || null;
+      if (sessionUser && sessionUser.email) {
+        const u = mapSupabaseUserToUser(sessionUser);
+        applyUserState(u);
+        if (session?.access_token) {
+          api.setToken(session.access_token);
+        }
       } else {
+        applyUserState(null);
         api.setToken(null);
       }
       setLoading(false);

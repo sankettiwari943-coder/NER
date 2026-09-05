@@ -70,13 +70,21 @@ class SupabaseAuthClient {
       const raw = localStorage.getItem(SESSION_STORAGE_KEY);
       if (raw) {
         const parsed: SupabaseSession = JSON.parse(raw);
-        if (parsed?.user?.email) {
-          // Strictly enforce that only ADMIN_EMAIL has admin role
-          parsed.user.role = this.determineRole(parsed.user.email);
-          this.currentSession = parsed;
-        } else {
+        // Purge mock or legacy demo tokens
+        if (
+          !parsed?.user?.email ||
+          parsed.access_token?.includes('demo') ||
+          parsed.access_token?.includes('local_token') ||
+          parsed.user?.id === 'usr_admin_sanket' ||
+          parsed.user?.id === 'usr_citizen_scout'
+        ) {
+          localStorage.removeItem(SESSION_STORAGE_KEY);
           this.currentSession = null;
+          return;
         }
+
+        parsed.user.role = this.determineRole(parsed.user.email);
+        this.currentSession = parsed;
       }
     } catch {
       this.currentSession = null;
@@ -154,7 +162,6 @@ class SupabaseAuthClient {
     const { email, password } = credentials;
     const role = this.determineRole(email);
 
-    // Try real Supabase endpoint
     if (this.url && this.anonKey) {
       try {
         const res = await fetch(`${this.url}/auth/v1/token?grant_type=password`, {
@@ -186,31 +193,17 @@ class SupabaseAuthClient {
           this.saveSession(session);
           this.notify('SIGNED_IN');
           return { data: { user, session }, error: null };
+        } else {
+          const errJson = await res.json().catch(() => ({}));
+          const errMsg = errJson.error_description || errJson.msg || errJson.message || 'Invalid email or password';
+          return { data: { user: null, session: null }, error: new Error(errMsg) };
         }
-      } catch (fetchErr) {
-        console.warn('Remote Supabase connection unreachable, using local authentication:', fetchErr);
+      } catch (fetchErr: any) {
+        return { data: { user: null, session: null }, error: new Error(fetchErr.message || 'Unable to connect to Supabase auth server') };
       }
     }
 
-    // Local / Offline fallback authentication
-    const user: SupabaseUser = {
-      id: `usr_${Date.now().toString(36)}`,
-      email,
-      full_name: role === 'admin' ? 'Sanket Tiwari (NDMA Authority)' : email.split('@')[0],
-      role,
-      organization: role === 'admin' ? 'National Disaster Management Authority (NDMA)' : 'NER Citizen Watch',
-      created_at: new Date().toISOString(),
-    };
-
-    const session: SupabaseSession = {
-      user,
-      access_token: `sb_local_token_${role}_${Date.now()}`,
-      expires_at: Date.now() + 86400 * 1000 * 7,
-    };
-
-    this.saveSession(session);
-    this.notify('SIGNED_IN');
-    return { data: { user, session }, error: null };
+    return { data: { user: null, session: null }, error: new Error('Supabase authentication configuration missing') };
   }
 
   /**
@@ -272,56 +265,17 @@ class SupabaseAuthClient {
           this.saveSession(session);
           this.notify('SIGNED_IN');
           return { data: { user, session }, error: null };
+        } else {
+          const errJson = await res.json().catch(() => ({}));
+          const errMsg = errJson.error_description || errJson.msg || errJson.message || 'Registration failed';
+          return { data: { user: null, session: null }, error: new Error(errMsg) };
         }
-      } catch (err) {
-        console.warn('Remote signup error, using offline simulation:', err);
+      } catch (err: any) {
+        return { data: { user: null, session: null }, error: new Error(err.message || 'Unable to connect to Supabase auth server') };
       }
     }
 
-    const user: SupabaseUser = {
-      id: `usr_${Date.now().toString(36)}`,
-      email,
-      full_name: fullName,
-      role,
-      organization: options?.data?.organization || (role === 'admin' ? 'National Disaster Management Authority (NDMA)' : 'Citizen Field Watch'),
-      created_at: new Date().toISOString(),
-    };
-
-    const session: SupabaseSession = {
-      user,
-      access_token: `sb_local_token_${role}_${Date.now()}`,
-      expires_at: Date.now() + 86400 * 1000 * 7,
-    };
-
-    this.saveSession(session);
-    this.notify('SIGNED_IN');
-    return { data: { user, session }, error: null };
-  }
-
-  /**
-   * Fast 1-Click Role Login for demo evaluation
-   */
-  public async signInAsDemoRole(targetRole: 'admin' | 'citizen'): Promise<AuthResponse> {
-    const isAdm = targetRole === 'admin';
-    const email = isAdm ? ADMIN_EMAIL : 'scout@ner.gov.in';
-    const user: SupabaseUser = {
-      id: isAdm ? 'usr_admin_sanket' : 'usr_citizen_scout',
-      email,
-      full_name: isAdm ? 'Sanket Tiwari (NDMA Authority)' : 'Field Officer (Citizen Scout)',
-      role: isAdm ? 'admin' : 'citizen',
-      organization: isAdm ? 'National Disaster Management Authority (NDMA)' : 'Citizen Field Scout Network',
-      created_at: new Date().toISOString(),
-    };
-
-    const session: SupabaseSession = {
-      user,
-      access_token: `sb_demo_${targetRole}_${Date.now()}`,
-      expires_at: Date.now() + 86400 * 1000 * 7,
-    };
-
-    this.saveSession(session);
-    this.notify('SIGNED_IN');
-    return { data: { user, session }, error: null };
+    return { data: { user: null, session: null }, error: new Error('Supabase configuration missing') };
   }
 
   /**

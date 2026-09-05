@@ -31,6 +31,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
+  const handleDismiss = () => {
+    setError(null);
+    setEmail('');
+    setPassword('');
+    onClose();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -49,7 +56,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           organization,
         });
       }
-      onClose();
+      handleDismiss();
     } catch (err: any) {
       setError(err.message || 'Authentication failed');
     } finally {
@@ -58,11 +65,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          handleDismiss();
+        }
+      }}
+    >
       <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 text-slate-800 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
         <button
+          type="button"
           id="btn-close-auth-modal"
-          onClick={onClose}
+          onClick={handleDismiss}
           className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1 cursor-pointer rounded-lg hover:bg-slate-100 transition"
         >
           <X className="w-5 h-5" />
