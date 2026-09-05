@@ -4,7 +4,7 @@
  * Features the complete Dual-Satellite Intelligence Fusion & Deterministic Factor Breakdown model.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Activity,
   CloudRain,
@@ -32,10 +32,21 @@ import {
   ExternalLink,
   X,
   Filter,
-  Camera
+  Camera,
+  Phone,
+  BellRing,
+  MessageSquare,
+  Radio,
+  Check,
+  Smartphone,
+  Send,
+  ShieldAlert
 } from 'lucide-react';
-import { LocationPoint, RiskAssessment, WeatherData, OutlookDay, CitizenReport, Alert } from '../types';
+import { LocationPoint, RiskAssessment, WeatherData, OutlookDay, CitizenReport, Alert, SmsLog } from '../types';
 import { WhatIfSimulator } from './WhatIfSimulator';
+import { supabase } from '../lib/supabase';
+import { api } from '../services/api';
+import { DEFAULT_SECTORS } from '../lib/smsService';
 
 interface UserDashboardProps {
   location: LocationPoint | null;
@@ -62,10 +73,92 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   onOpenMap,
   onRefreshData,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'simulator' | 'myreports'>('overview');
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'simulator' | 'myreports' | 'sms_settings'>('overview');
   const [submissionFilter, setSubmissionFilter] = useState<'ALL' | 'PENDING' | 'UNDER REVIEW' | 'VERIFIED' | 'REJECTED'>('ALL');
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // SMS Alert Subscription State
+  const [phoneNumber, setPhoneNumber] = useState('+91 9876543210');
+  const [assignedSector, setAssignedSector] = useState('Kohima (NH-29)');
+  const [smsAlertsEnabled, setSmsAlertsEnabled] = useState(true);
+  const [isSavingSms, setIsSavingSms] = useState(false);
+  const [smsSaveMessage, setSmsSaveMessage] = useState<string | null>(null);
+  const [isSendingTestSms, setIsSendingTestSms] = useState(false);
+  const [testSmsSuccess, setTestSmsSuccess] = useState<string | null>(null);
+  const [sectorSmsLogs, setSectorSmsLogs] = useState<SmsLog[]>([]);
+
+  // Fetch existing user profile & SMS settings on mount
+  useEffect(() => {
+    async function loadSmsSettings() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data } = await supabase
+            .from('profiles')
+            .select('phone_number, assigned_sector, sms_alerts_enabled')
+            .eq('id', user.id)
+            .single();
+
+          if (data) {
+            setPhoneNumber(data.phone_number || user.phone || '+91 9876543210');
+            setAssignedSector(data.assigned_sector || 'Kohima (NH-29)');
+            setSmsAlertsEnabled(data.sms_alerts_enabled ?? true);
+          }
+        }
+        const logsRes = await api.getSmsLogs();
+        setSectorSmsLogs(logsRes.logs);
+      } catch (err) {
+        console.warn('Error loading SMS profile:', err);
+      }
+    }
+    loadSmsSettings();
+  }, []);
+
+  const handleSaveSmsSettings = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsSavingSms(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('profiles').upsert({
+          id: user.id,
+          phone_number: phoneNumber,
+          assigned_sector: assignedSector,
+          sms_alerts_enabled: smsAlertsEnabled,
+          updated_at: new Date().toISOString()
+        });
+        setSmsSaveMessage(`SMS subscription updated! Sector "${assignedSector}" is registered for direct emergency alerts.`);
+        setTimeout(() => setSmsSaveMessage(null), 4500);
+      }
+    } catch (err) {
+      console.error('Failed to save SMS settings:', err);
+    } finally {
+      setIsSavingSms(false);
+    }
+  };
+
+  const handleSendTestSms = async () => {
+    setIsSendingTestSms(true);
+    try {
+      const res = await api.dispatchEmergencySms({
+        title: 'NDMA Connectivity Drill & Cell Broadcast Test',
+        locationName: assignedSector,
+        sector: assignedSector,
+        severity: 'INFO',
+        action: 'Platform SMS gateway operational check. No emergency action required.',
+        triggerType: 'TEST_BROADCAST'
+      });
+      setTestSmsSuccess(`Emergency drill message dispatched to ${phoneNumber} (${res.dispatchedCount} cell subscriber gateway ACK).`);
+      const updatedLogs = await api.getSmsLogs();
+      setSectorSmsLogs(updatedLogs.logs);
+      setTimeout(() => setTestSmsSuccess(null), 5000);
+    } catch (err) {
+      console.error('Test SMS broadcast failed:', err);
+    } finally {
+      setIsSendingTestSms(false);
+    }
+  };
 
   const compositeScore = risk?.compositeScore ?? risk?.riskScore ?? 88;
   const isCritical = (risk?.riskLevel === 'CRITICAL') || compositeScore >= 80;
@@ -75,6 +168,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
       setIsRefreshing(true);
       try {
         await onRefreshData();
+        const logsRes = await api.getSmsLogs();
+        setSectorSmsLogs(logsRes.logs);
       } finally {
         setTimeout(() => setIsRefreshing(false), 500);
       }
@@ -120,7 +215,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             id="btn-subtab-overview"
             onClick={() => setActiveSubTab('overview')}
@@ -154,6 +249,21 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             }`}
           >
             My Reports ({userReports.length})
+          </button>
+          <button
+            id="btn-subtab-sms-settings"
+            onClick={() => setActiveSubTab('sms_settings')}
+            className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 transition cursor-pointer ${
+              activeSubTab === 'sms_settings'
+                ? 'bg-white text-indigo-700 font-semibold border border-slate-200 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <BellRing className="w-3.5 h-3.5 text-rose-600" />
+            <span>SMS Alerts</span>
+            {smsAlertsEnabled && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            )}
           </button>
         </div>
       </div>
@@ -509,6 +619,258 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* SUBTAB: EMERGENCY ALERT SMS SUBSCRIPTIONS */}
+      {activeSubTab === 'sms_settings' && (
+        <div className="space-y-6">
+          {/* Main Card */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-rose-50 text-rose-600 border border-rose-100">
+                    <Radio className="w-5 h-5 text-rose-600 animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                      <span>Emergency Alert SMS Subscriptions</span>
+                    </h2>
+                    <span className="text-xs text-slate-500">
+                      Direct integration with NDMA Disaster Cell Broadcast &amp; SMS Gateway (CAP v1.2 Protocol).
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>GATEWAY LIVE</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Notification / Feedback Alerts */}
+            {smsSaveMessage && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{smsSaveMessage}</span>
+              </div>
+            )}
+
+            {testSmsSuccess && (
+              <div className="p-3.5 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                <Smartphone className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>{testSmsSuccess}</span>
+              </div>
+            )}
+
+            {/* Form & Controls Grid */}
+            <form onSubmit={handleSaveSmsSettings} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Left Column: Phone & Sector Settings */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Registered Mobile Phone Number</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="input-sms-phone"
+                      type="tel"
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      placeholder="+91 9876543210"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm font-mono text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-semibold"
+                      required
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Enter valid 10-digit phone number with country code (e.g. +91 9876543210) to receive immediate SMS notifications.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Target Monitored Hazard Sector</span>
+                  </label>
+                  <select
+                    id="select-sms-sector"
+                    value={assignedSector}
+                    onChange={(e) => setAssignedSector(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500 font-semibold"
+                  >
+                    {DEFAULT_SECTORS.map((sec) => (
+                      <option key={sec} value={sec}>
+                        {sec}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Emergency SMS dispatches are filtered to hazards occurring within or threatening this transport corridor.
+                  </p>
+                </div>
+              </div>
+
+              {/* Right Column: Toggle & Actions */}
+              <div className="space-y-4 flex flex-col justify-between">
+                {/* Toggle Card */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                        <BellRing className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Receive Emergency SMS Alerts</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Toggle real-time cell broadcast and SMS dispatch.
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      id="toggle-sms-enabled"
+                      onClick={() => setSmsAlertsEnabled(!smsAlertsEnabled)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        smsAlertsEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                      }`}
+                      role="switch"
+                      aria-checked={smsAlertsEnabled}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                          smsAlertsEnabled ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] pt-2 border-t border-slate-200/80 text-slate-600 flex items-center justify-between">
+                    <span>Subscription Status:</span>
+                    <strong className={smsAlertsEnabled ? 'text-emerald-700 font-bold' : 'text-slate-500'}>
+                      {smsAlertsEnabled ? 'ACTIVE & SUBSCRIBED' : 'PAUSED (NO SMS)'}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                  <button
+                    type="submit"
+                    id="btn-save-sms-settings"
+                    disabled={isSavingSms}
+                    className="w-full sm:w-auto flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSavingSms ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Saving Preferences...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Save SMS Subscriptions</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    id="btn-send-test-sms"
+                    onClick={handleSendTestSms}
+                    disabled={isSendingTestSms || !phoneNumber}
+                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition disabled:opacity-50 cursor-pointer"
+                    title="Send a sample test drill alert to verified phone number"
+                  >
+                    {isSendingTestSms ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-slate-500" />
+                        <span>Dispatched Drill...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5 text-slate-600" />
+                        <span>Send Test Drill Alert</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          {/* SMS Broadcast Feed & History for Sector */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-indigo-600" />
+                  <span>Recent Emergency Cell Broadcasts ({assignedSector})</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Audit stream of actual SMS dispatches triggered by NDMA authority verifications or CAP emergency alerts.
+                </p>
+              </div>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 text-slate-600 border border-slate-200 font-bold uppercase">
+                DISASTER AUDIT STREAM
+              </span>
+            </div>
+
+            {sectorSmsLogs.length === 0 ? (
+              <div className="py-12 text-center bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 space-y-1">
+                <CheckCircle2 className="w-6 h-6 text-emerald-500 mx-auto mb-1" />
+                <div className="font-bold text-slate-700">All Quiet in Monitored Sector</div>
+                <p className="text-slate-400">No emergency SMS alerts have been dispatched in this corridor recently.</p>
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                {sectorSmsLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-2 hover:border-slate-300 transition shadow-2xs"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                            log.severity === 'CRITICAL'
+                              ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                              : log.severity === 'WARNING'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : 'bg-indigo-100 text-indigo-800 border border-indigo-300'
+                          }`}
+                        >
+                          {log.severity}
+                        </span>
+                        <span className="font-mono text-[11px] font-bold text-slate-700">
+                          To: {log.recipient_phone}
+                        </span>
+                        <span className="text-slate-400 text-[10px] font-mono">
+                          ({log.recipient_sector})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
+                        <Check className="w-2.5 h-2.5" />
+                        <span>{log.delivery_status}</span>
+                      </div>
+                    </div>
+
+                    <p className="text-slate-800 text-[11px] font-mono bg-white p-2.5 rounded-lg border border-slate-200 leading-relaxed">
+                      {log.message}
+                    </p>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1">
+                      <span>Trigger: <strong>{log.trigger_type}</strong></span>
+                      <span>{new Date(log.created_at).toLocaleString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

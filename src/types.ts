@@ -353,3 +353,26 @@ export interface AnalyticsData {
   dataFreshnessStatus: string;
   pendingApprovalAlertsCount?: number;
 }
+
+export interface SmsLog {
+  id: string;
+  recipient_phone: string;
+  recipient_name?: string;
+  recipient_sector: string;
+  message: string;
+  severity: 'CRITICAL' | 'WARNING' | 'ADVISORY' | 'INFO';
+  trigger_type: 'INCIDENT_VERIFIED' | 'CAP_BROADCAST' | 'GATE_APPROVED' | 'TEST_BROADCAST';
+  delivery_status: 'DELIVERED' | 'SENT' | 'FAILED';
+  gateway_response?: string;
+  created_at: string;
+}
+
+export interface UserProfile {
+  id: string;
+  phone_number?: string;
+  assigned_sector?: string;
+  sms_alerts_enabled?: boolean;
+  full_name?: string;
+  email?: string;
+  updated_at?: string;
+}

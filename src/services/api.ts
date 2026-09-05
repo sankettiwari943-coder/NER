@@ -23,10 +23,18 @@ import {
   CopilotBriefing,
   SystemHealthData,
   AnalyticsData,
-  FactorContribution
+  FactorContribution,
+  SmsLog,
+  UserProfile
 } from '../types';
 import { supabase, ADMIN_EMAIL } from '../lib/supabase';
 import { analyzeFieldImage } from '../lib/aiVision';
+import {
+  dispatchEmergencySms,
+  getSmsLogs,
+  getUserSmsProfile,
+  saveUserSmsProfile
+} from '../lib/smsService';
 
 // ============================================================================
 // Curated Mock Data & Client Simulation Models
@@ -1095,6 +1103,19 @@ class ApiService {
       console.warn('Supabase status update error:', sbErr);
     }
 
+    // Automatically dispatch emergency SMS when an incident is officially verified by NDMA authority
+    if (status === 'VERIFIED') {
+      dispatchEmergencySms({
+        title: `${updated.hazard_type} Verified`,
+        locationName: updated.location_name,
+        sector: updated.location_name,
+        severity: (updated.severity as any) || 'HIGH',
+        action: note || 'Disaster management field response active. Road users exercise caution.',
+        triggerType: 'INCIDENT_VERIFIED',
+        incidentId: updated.id
+      }).catch(err => console.warn('SMS dispatch on verification:', err));
+    }
+
     try {
       await this.request(`/api/v1/reports/${reportId}/status`, {
         method: 'PATCH',
@@ -1186,6 +1207,16 @@ class ApiService {
   }
 
   public async approveAlert(alertId: string): Promise<{ message: string; alert: Alert }> {
+    // Dispatch SMS broadcast upon human gate approval
+    dispatchEmergencySms({
+      title: 'Human-Gated Alert Approved & Broadcast',
+      locationName: 'NER Monitored Sector',
+      severity: 'CRITICAL',
+      action: 'Mandatory NDMA disaster action protocol activated.',
+      triggerType: 'GATE_APPROVED',
+      incidentId: alertId
+    }).catch(err => console.warn('SMS dispatch on alert approval:', err));
+
     return await this.request(`/api/v1/admin/alerts/${alertId}/approve`, {
       method: 'POST',
     });
@@ -1209,29 +1240,71 @@ class ApiService {
     affected_area?: string;
     recommended_action?: string;
   }): Promise<{ alert: Alert }> {
+    const alert: Alert = {
+      id: 'alert_' + Date.now(),
+      title: payload.title,
+      severity: payload.severity as any,
+      location_name: payload.location_name,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      radius_km: payload.radius_km || 10,
+      source: (payload.source as any) || 'ADMIN',
+      status: 'ACTIVE',
+      affected_area: payload.affected_area || 'Regional slope sector',
+      recommended_action: payload.recommended_action || 'Maintain active monitoring and pre-position equipment.',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // Trigger targeted SMS broadcast across registered subscribers
+    dispatchEmergencySms({
+      title: payload.title,
+      locationName: payload.location_name,
+      sector: payload.location_name,
+      severity: (payload.severity as any) || 'WARNING',
+      action: payload.recommended_action,
+      triggerType: 'CAP_BROADCAST',
+      incidentId: alert.id
+    }).catch(err => console.warn('SMS dispatch on createAlert:', err));
+
     try {
       return await this.request('/api/v1/alerts', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
     } catch {
-      const alert: Alert = {
-        id: 'alert_' + Date.now(),
-        title: payload.title,
-        severity: payload.severity as any,
-        location_name: payload.location_name,
-        latitude: payload.latitude,
-        longitude: payload.longitude,
-        radius_km: payload.radius_km || 10,
-        source: (payload.source as any) || 'ADMIN',
-        status: 'ACTIVE',
-        affected_area: payload.affected_area || 'Regional slope sector',
-        recommended_action: payload.recommended_action || 'Maintain active monitoring and pre-position equipment.',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
       return { alert };
     }
+  }
+
+  // Emergency SMS Subscriptions & Dispatch Audit Logs
+  public async getSmsLogs(): Promise<{ count: number; logs: SmsLog[] }> {
+    const logs = await getSmsLogs();
+    return { count: logs.length, logs };
+  }
+
+  public async dispatchEmergencySms(params: {
+    title: string;
+    locationName: string;
+    sector?: string;
+    severity: 'CRITICAL' | 'WARNING' | 'ADVISORY' | 'INFO';
+    action?: string;
+    triggerType: 'INCIDENT_VERIFIED' | 'CAP_BROADCAST' | 'GATE_APPROVED' | 'TEST_BROADCAST';
+    incidentId?: string;
+  }): Promise<{ dispatchedCount: number; logs: SmsLog[]; messageText: string }> {
+    return await dispatchEmergencySms(params);
+  }
+
+  public async getUserSmsProfile(): Promise<UserProfile | null> {
+    return await getUserSmsProfile();
+  }
+
+  public async saveUserSmsProfile(profile: {
+    phone_number: string;
+    assigned_sector: string;
+    sms_alerts_enabled: boolean;
+  }): Promise<{ success: boolean; profile: UserProfile | null }> {
+    return await saveUserSmsProfile(profile);
   }
 
   public async resolveAlert(alertId: string): Promise<{ alert: Alert }> {

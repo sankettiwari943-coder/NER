@@ -302,6 +302,26 @@ class SupabaseAuthClient {
   }
 }
 
+// Client-side local in-memory & localStorage table cache fallback
+const LOCAL_TABLE_STORAGE_KEY_PREFIX = 'sb_local_table_';
+
+function getLocalTable(tableName: string): any[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(`${LOCAL_TABLE_STORAGE_KEY_PREFIX}${tableName}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalTable(tableName: string, rows: any[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(`${LOCAL_TABLE_STORAGE_KEY_PREFIX}${tableName}`, JSON.stringify(rows));
+  } catch {}
+}
+
 export class SupabaseClient {
   public auth: SupabaseAuthClient;
   public url: string;
@@ -317,52 +337,155 @@ export class SupabaseClient {
     const baseUrl = `${this.url.replace(/\/+$/, '')}/rest/v1/${tableName}`;
     const key = this.anonKey;
 
-    return {
-      select: (columns: string = '*') => ({
-        eq: async (column: string, value: any) => {
-          try {
-            const res = await fetch(`${baseUrl}?select=${columns}&${column}=eq.${encodeURIComponent(value)}`, {
-              headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
-            });
-            if (res.ok) {
-              const data = await res.json();
-              return { data, error: null };
-            }
-          } catch {}
-          return { data: [], error: null };
-        },
-        order: async () => {
-          try {
-            const res = await fetch(`${baseUrl}?select=${columns}`, {
-              headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
-            });
-            if (res.ok) {
-              const data = await res.json();
-              return { data, error: null };
-            }
-          } catch {}
-          return { data: [], error: null };
-        }
-      }),
-      insert: async (records: any | any[]) => {
-        try {
-          const res = await fetch(baseUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': key,
-              'Authorization': `Bearer ${key}`,
-              'Prefer': 'return=representation'
-            },
-            body: JSON.stringify(records)
-          });
-          if (res.ok) {
+    const executeFetch = async (queryUrl: string, options: RequestInit = {}): Promise<{ data: any; error: any }> => {
+      try {
+        const token = this.auth.getUser() ? (this.auth as any).currentSession?.access_token || key : key;
+        const res = await fetch(queryUrl, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': key,
+            'Authorization': `Bearer ${token}`,
+            ...(options.headers || {})
+          }
+        });
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
             const data = await res.json();
             return { data, error: null };
           }
-        } catch {}
-        return { data: records, error: null };
+          return { data: null, error: null };
+        }
+      } catch (err) {
+        console.warn(`Supabase query on ${tableName} failed, falling back to local store:`, err);
       }
+      return { data: null, error: null };
+    };
+
+    return {
+      select: (columns: string = '*') => {
+        let filters: Array<{ col: string; val: any }> = [];
+        let orFilter: string | null = null;
+        let isSingle = false;
+
+        const runQuery = async () => {
+          let queryUrl = `${baseUrl}?select=${columns}`;
+          for (const f of filters) {
+            queryUrl += `&${f.col}=eq.${encodeURIComponent(f.val)}`;
+          }
+          if (orFilter) {
+            queryUrl += `&or=(${encodeURIComponent(orFilter)})`;
+          }
+
+          const remote = await executeFetch(queryUrl);
+          if (remote.data && Array.isArray(remote.data)) {
+            if (isSingle) {
+              return { data: remote.data[0] || null, error: null };
+            }
+            return { data: remote.data, error: null };
+          }
+
+          // Local storage fallback
+          let localRows = getLocalTable(tableName);
+          for (const f of filters) {
+            localRows = localRows.filter((r: any) => String(r[f.col]) === String(f.val));
+          }
+          if (isSingle) {
+            return { data: localRows[0] || null, error: null };
+          }
+          return { data: localRows, error: null };
+        };
+
+        const builder: any = {
+          eq: (col: string, val: any) => {
+            filters.push({ col, val });
+            return builder;
+          },
+          or: (expr: string) => {
+            orFilter = expr;
+            return builder;
+          },
+          order: (_col: string, _opts?: any) => {
+            return builder;
+          },
+          single: async () => {
+            isSingle = true;
+            return await runQuery();
+          },
+          then: (onfulfilled?: any, onrejected?: any) => {
+            return runQuery().then(onfulfilled, onrejected);
+          }
+        };
+
+        return builder;
+      },
+
+      insert: async (records: any | any[]) => {
+        const arr = Array.isArray(records) ? records : [records];
+        // Save to local cache
+        const localRows = getLocalTable(tableName);
+        saveLocalTable(tableName, [...arr, ...localRows]);
+
+        const remote = await executeFetch(baseUrl, {
+          method: 'POST',
+          headers: { 'Prefer': 'return=representation' },
+          body: JSON.stringify(records)
+        });
+
+        if (remote.data) {
+          return { data: remote.data, error: null };
+        }
+        return { data: records, error: null };
+      },
+
+      upsert: async (records: any | any[], _options?: any) => {
+        const arr = Array.isArray(records) ? records : [records];
+        // Update local table
+        let localRows = getLocalTable(tableName);
+        for (const item of arr) {
+          const idx = localRows.findIndex((r: any) => r.id === item.id);
+          if (idx >= 0) {
+            localRows[idx] = { ...localRows[idx], ...item };
+          } else {
+            localRows = [item, ...localRows];
+          }
+        }
+        saveLocalTable(tableName, localRows);
+
+        const remote = await executeFetch(baseUrl, {
+          method: 'POST',
+          headers: {
+            'Prefer': 'resolution=merge-duplicates,return=representation'
+          },
+          body: JSON.stringify(records)
+        });
+
+        if (remote.data) {
+          return { data: remote.data, error: null };
+        }
+        return { data: records, error: null };
+      },
+
+      update: (updates: any) => ({
+        eq: async (column: string, value: any) => {
+          // Update local table
+          let localRows = getLocalTable(tableName);
+          localRows = localRows.map((r: any) => (String(r[column]) === String(value) ? { ...r, ...updates } : r));
+          saveLocalTable(tableName, localRows);
+
+          const queryUrl = `${baseUrl}?${column}=eq.${encodeURIComponent(value)}`;
+          const remote = await executeFetch(queryUrl, {
+            method: 'PATCH',
+            headers: { 'Prefer': 'return=representation' },
+            body: JSON.stringify(updates)
+          });
+          if (remote.data) {
+            return { data: remote.data, error: null };
+          }
+          return { data: updates, error: null };
+        }
+      })
     };
   }
 }
@@ -372,3 +495,4 @@ export function createClient(url: string, anonKey: string): SupabaseClient {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
