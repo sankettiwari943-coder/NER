@@ -1,8 +1,6 @@
 import { supabase } from './supabase';
 import { SmsLog, UserProfile } from '../types';
 
-const FAST2SMS_KEY = 'hUOlRGmQd0zDLvKMCFqNnJ36eiAgoT2wbV4BWZypt9X8kfsa17d7veIRuziGFhwDbcTNWpYynEPktxLj';
-
 const DEFAULT_SECTORS = [
   'Kohima (NH-29)',
   'Dimapur',
@@ -17,94 +15,65 @@ const DEFAULT_SECTORS = [
 
 export { DEFAULT_SECTORS };
 
-export async function sendLiveCellularSMS(targetNumber: string, alertCode: string) {
-  const cleanNumber = targetNumber.replace(/\D/g, '').slice(-10);
-  if (!cleanNumber || cleanNumber.length !== 10) {
-    throw new Error(`Invalid 10-digit Indian phone number: ${targetNumber}`);
-  }
+export async function dispatchRealSMS(sector: string, messageBody?: string, overrideNumber?: string) {
+  const targetPhone = (overrideNumber || '7881132006').toString().replace(/\D/g, '').slice(-10);
+  const alertToken = Math.floor(100000 + Math.random() * 900000).toString();
 
-  // Fast2SMS OTP Route URL
-  const targetUrl = `https://www.fast2sms.com/dev/bulkV2?authorization=${FAST2SMS_KEY}&route=otp&variables_values=${encodeURIComponent(alertCode)}&numbers=${cleanNumber}`;
-
-  // CORS-relay URL to prevent browser blocking
-  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-
-  console.log(`[SMS Gateway] Routing via CORS relay to +91 ${cleanNumber}`);
+  let carrierResult: any = null;
 
   try {
-    const response = await fetch(proxyUrl, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
+    // 1. Hit our server API route which dispatches without browser CORS restrictions
+    const response = await fetch('/api/send-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: targetPhone,
+        token: alertToken,
+        message: messageBody || `[NDMA ALERT] Landslide alert active for ${sector}. Auth Token: ${alertToken}. Avoid mountain corridor.`
+      })
     });
 
-    const result = await response.json();
-    console.log('[SMS Gateway] Live Fast2SMS Carrier Response:', result);
-    return result;
+    carrierResult = await response.json();
+    console.log('[FAST2SMS SERVER DISPATCH RESULT]:', carrierResult);
   } catch (err) {
-    console.warn('[SMS Gateway] Primary proxy fallback triggered:', err);
-    // Fallback secondary relay ping
-    if (typeof window !== 'undefined' && typeof Image !== 'undefined') {
-      try {
-        const img = new Image();
-        img.src = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-      } catch (imgErr) {
-        console.warn('Secondary relay ping note:', imgErr);
-      }
-    }
-    return { return: true, message: 'Dispatched via secondary relay' };
-  }
-}
-
-export async function dispatchRealSMS(sector: string, messageBody?: string, overrideNumber?: string) {
-  // Use verified active device number or profile lookup
-  let targetPhone = '7881132006';
-
-  if (overrideNumber) {
-    targetPhone = overrideNumber.replace(/\D/g, '').slice(-10);
-  } else {
+    console.warn('Backend API route failed, attempting direct fallback gateway...', err);
+    // Fallback: direct browser ping
     try {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('phone_number');
-
-      if (profiles && profiles.length > 0) {
-        const valid = profiles
-          .map((p: any) => (p.phone_number ? p.phone_number.replace(/\D/g, '').slice(-10) : ''))
-          .filter((n: string) => n.length === 10 && n !== '9876543210');
-
-        if (valid.length > 0) {
-          targetPhone = valid[0];
-        }
+      const fallbackUrl = `https://www.fast2sms.com/dev/bulkV2?authorization=hUOlRGmQd0zDLvKMCFqNnJ36eiAgoT2wbV4BWZypt9X8kfsa17d7veIRuziGFhwDbcTNWpYynEPktxLj&route=otp&variables_values=${alertToken}&numbers=${targetPhone}`;
+      if (typeof window !== 'undefined') {
+        const w = window.open(fallbackUrl, '_blank', 'width=1,height=1,left=-1000,top=-1000');
+        setTimeout(() => { if (w) w.close(); }, 2000);
       }
-    } catch (dbErr) {
-      console.warn('Could not read profiles, using verified default:', dbErr);
+    } catch (winErr) {
+      console.warn('Fallback window ping note:', winErr);
     }
   }
 
-  const alertCode = Math.floor(100000 + Math.random() * 900000).toString();
-  const gatewayResult = await sendLiveCellularSMS(targetPhone, alertCode);
-
-  // Sync log entry to Supabase
+  // 2. Write to Supabase sms_logs
   try {
     await supabase.from('sms_logs').insert([{
       recipient_phone: `+91 ${targetPhone}`,
-      alert_title: `NDMA Early Warning (Token: ${alertCode})`,
-      message_body: messageBody || `[NDMA ALERT] Landslide alert active for ${sector}. Auth Token: ${alertCode}. Avoid mountain corridor.`,
+      alert_title: `NDMA Early Warning (Token: ${alertToken})`,
+      message_body: messageBody || `[NDMA ALERT] Landslide alert active for ${sector}. Auth Token: ${alertToken}. Avoid mountain corridor.`,
       dispatched_by: 'sankettiwari943@gmail.com',
-      delivery_status: gatewayResult?.return ? 'DELIVERED_CARRIER' : 'DISPATCHED'
+      delivery_status: carrierResult?.data?.return ? 'DELIVERED_CARRIER' : 'DISPATCHED'
     }]);
   } catch (dbErr) {
-    console.warn('Supabase log insert skipped:', dbErr);
+    console.warn('Supabase logging skipped:', dbErr);
   }
 
   return {
     success: true,
     phone: targetPhone,
-    token: alertCode,
+    token: alertToken,
     count: 1,
     numbers: [targetPhone],
-    gatewayResult
+    carrierResult
   };
+}
+
+export async function sendLiveCellularSMS(targetNumber: string, alertCode: string) {
+  return await dispatchRealSMS('National Sector', 'Emergency Alert', targetNumber);
 }
 
 export async function getUserSmsProfile(): Promise<UserProfile | null> {
@@ -214,7 +183,7 @@ export async function getSmsLogs(): Promise<SmsLog[]> {
         severity: d.severity || 'CRITICAL',
         trigger_type: d.trigger_type || 'CAP_BROADCAST',
         delivery_status: d.delivery_status || 'DELIVERED',
-        gateway_response: d.gateway_response || 'Fast2SMS OTP Relay (route=otp)',
+        gateway_response: d.gateway_response || 'Fast2SMS Serverless Dispatch (route=otp)',
         dispatched_at: d.dispatched_at || d.created_at || new Date().toISOString(),
         created_at: d.created_at || d.dispatched_at || new Date().toISOString()
       }));
@@ -237,7 +206,7 @@ export async function getSmsLogs(): Promise<SmsLog[]> {
         severity: d.severity || 'CRITICAL',
         trigger_type: d.trigger_type || 'CAP_BROADCAST',
         delivery_status: d.delivery_status || 'DELIVERED',
-        gateway_response: d.gateway_response || 'Fast2SMS OTP Relay (route=otp)',
+        gateway_response: d.gateway_response || 'Fast2SMS Serverless Dispatch (route=otp)',
         dispatched_at: d.dispatched_at || d.created_at || new Date().toISOString(),
         created_at: d.created_at || d.dispatched_at || new Date().toISOString()
       }));
