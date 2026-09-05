@@ -1,5 +1,7 @@
 /**
- * Header and Navigation Component
+ * Header and Navigation Component (SIH-26001 Aligned)
+ * Features live sync status pill, manual [Go Offline] / [Go Online] simulation toggle,
+ * [Sync Now] trigger, role indicator, and global search.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -19,12 +21,13 @@ import {
   Activity,
   Layers,
   Radio,
-  ExternalLink
+  Wifi,
+  WifiOff,
+  RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { LocationPoint } from '../types';
 import { api } from '../services/api';
-
 import { useOfflineSync } from '../context/OfflineSyncContext';
 
 interface HeaderProps {
@@ -46,8 +49,16 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuthModal,
   dataFreshness,
 }) => {
-  const { user, logout, fastLogin } = useAuth();
-  const { isOnline, queuedCount, isSyncing, triggerManualSync } = useOfflineSync();
+  const { user, logout, fastLogin, isAdmin } = useAuth();
+  const {
+    isOnline,
+    isSimulatedOffline,
+    queuedCount,
+    isSyncing,
+    triggerManualSync,
+    toggleSimulatedOffline
+  } = useOfflineSync();
+
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<LocationPoint[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -89,84 +100,104 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'map', label: 'India Map', icon: Layers },
     { id: 'dashboard', label: 'User Dashboard', icon: Activity },
     { id: 'alerts', label: 'Alerts & Roads', icon: AlertTriangle },
-    { id: 'evidence', label: 'Evidence & RAG', icon: FileText },
+    { id: 'evidence', label: 'Evidence & RAG', icon: FileText, adminOnly: false },
     { id: 'copilot', label: 'AI Copilot', icon: Bot },
   ];
 
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-slate-200 text-slate-800 shadow-xs">
-      {/* Top Banner: Status, Offline Indicator & Rapid Role Switcher */}
+      {/* Top Banner: Sync Status Indicator, Demo Offline Toggle & Fast Auth */}
       <div className="bg-slate-900 border-b border-slate-800 px-4 py-1.5 text-xs flex flex-wrap items-center justify-between gap-2 text-slate-200">
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          {/* Online/Offline Visual Indicator */}
-          {!isOnline || queuedCount > 0 ? (
-            <div className="flex items-center gap-1.5 bg-amber-950/80 text-amber-300 px-2.5 py-0.5 rounded border border-amber-700/60 font-mono font-bold text-[11px]">
+          {/* Dynamic Sync Status Pill (SIH Core Requirement) */}
+          {!isOnline || isSimulatedOffline ? (
+            <div className="flex items-center gap-2 bg-amber-950/90 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-700/80 font-mono font-bold text-[11px] shadow-xs">
               <span className="flex h-2 w-2 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
               </span>
               <span>
-                {queuedCount === 1
-                  ? 'Offline Mode: 1 report waiting to sync'
-                  : queuedCount > 1
-                  ? `Offline Mode: ${queuedCount} reports waiting to sync`
-                  : 'Offline Mode (0 reports queued)'}
+                🟠 Offline Mode Active ({queuedCount} {queuedCount === 1 ? 'report' : 'reports'} waiting to sync)
               </span>
-              {isOnline && (
-                <button
-                  id="btn-manual-sync-now"
-                  onClick={() => triggerManualSync()}
-                  disabled={isSyncing}
-                  className="ml-1 px-1.5 py-0.2 bg-amber-600 hover:bg-amber-500 text-slate-950 rounded text-[10px] font-extrabold uppercase transition cursor-pointer"
-                >
-                  {isSyncing ? 'Syncing...' : 'Sync Now'}
-                </button>
-              )}
+
+              {/* Sync Now Action */}
+              <button
+                id="btn-sync-now"
+                onClick={() => triggerManualSync()}
+                disabled={isSyncing}
+                className="ml-1 px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-[10px] font-extrabold uppercase transition cursor-pointer flex items-center gap-1 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
+              </button>
+
+              {/* Toggle to Reconnect */}
+              <button
+                id="btn-toggle-online"
+                onClick={toggleSimulatedOffline}
+                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded text-[10px] font-medium transition cursor-pointer"
+                title="Restore simulated connection"
+              >
+                Go Online
+              </button>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 bg-emerald-950/60 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800/60 font-mono text-[11px]">
+            <div className="flex items-center gap-2 bg-emerald-950/80 text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-800/80 font-mono text-[11px] shadow-xs">
               <span className="flex h-2 w-2 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span className="font-semibold text-emerald-400">Online Sync Active</span>
+              <span className="font-semibold text-emerald-300">
+                🟢 Online Sync Active (Live Sensor Streaming)
+              </span>
+
+              {/* Manual Go Offline Toggle Button for Demo Testing */}
+              <button
+                id="btn-toggle-offline"
+                onClick={toggleSimulatedOffline}
+                className="ml-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded text-[10px] font-medium transition cursor-pointer flex items-center gap-1"
+                title="Simulate network disconnection in remote NER sector"
+              >
+                <WifiOff className="w-3 h-3 text-amber-400" />
+                <span>Go Offline</span>
+              </button>
             </div>
           )}
 
           <span className="hidden sm:inline text-slate-600">|</span>
-          <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-400">
+          <div className="hidden md:flex items-center gap-1.5 text-[11px] text-slate-400">
             <span>FEED:</span>
             <span className="text-slate-200 font-mono">{dataFreshness}</span>
             <span className="text-slate-600">&bull;</span>
-            <span className="text-indigo-400 font-mono font-medium">Dual-Satellite SAR & Optical</span>
+            <span className="text-indigo-400 font-mono font-medium">Dual-Satellite (Sentinel-1 SAR + Sentinel-2)</span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           {!user ? (
             <div className="flex items-center gap-1.5 text-[11px]">
-              <span className="text-slate-400">Quick Test:</span>
+              <span className="text-slate-400">Demo Access:</span>
               <button
                 id="btn-quick-analyst"
-                onClick={() => fastLogin('USER')}
-                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+                onClick={() => fastLogin('user')}
+                className="px-2.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition font-medium cursor-pointer"
               >
-                Analyst
+                Field Scout
               </button>
               <button
                 id="btn-quick-admin"
-                onClick={() => fastLogin('ADMIN')}
-                className="px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/60 transition"
+                onClick={() => fastLogin('admin')}
+                className="px-2.5 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/60 transition font-bold cursor-pointer"
               >
-                NDMA Admin
+                DDMA Admin
               </button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <span className="text-slate-400">Logged in:</span>
-              <span className="font-medium text-slate-200 truncate max-w-[140px]">{user.full_name}</span>
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                user.role === 'ADMIN' ? 'bg-rose-900/80 text-rose-200 border border-rose-700/60' : 'bg-indigo-900/80 text-indigo-200 border border-indigo-700/60'
+              <span className="text-slate-400">User:</span>
+              <span className="font-medium text-slate-200 truncate max-w-[150px]">{user.full_name}</span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                isAdmin ? 'bg-rose-900/90 text-rose-200 border border-rose-700' : 'bg-indigo-900/90 text-indigo-200 border border-indigo-700'
               }`}>
                 {user.role}
               </span>
@@ -186,11 +217,11 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center gap-2">
               <span className="font-bold text-sm sm:text-base tracking-tight text-slate-900">NER Landslide Platform</span>
               <span className="hidden md:inline-block px-1.5 py-0.5 rounded text-[10px] bg-slate-100 border border-slate-200 text-slate-600 uppercase font-mono font-medium">
-                India-Wide Early Warning
+                SIH-26001
               </span>
             </div>
             <p className="text-[11px] text-slate-500 hidden sm:block">
-              Geospatial Intelligence &bull; Deterministic Risk &bull; Citizen Field Reports
+              Geospatial Intelligence &bull; Dual-Satellite Fusion &bull; Offline Resilience
             </p>
           </div>
         </div>
@@ -207,7 +238,7 @@ export const Header: React.FC<HeaderProps> = ({
               onFocus={() => {
                 if (searchQuery.trim()) setShowSearchDropdown(true);
               }}
-              placeholder={selectedLocation ? `Location: ${selectedLocation.name}, ${selectedLocation.state}` : 'Search Indian city, district, highway, or hills...'}
+              placeholder={selectedLocation ? `Focus: ${selectedLocation.name}, ${selectedLocation.state}` : 'Search Kohima, Haflong, NH-29, Shillong...'}
               className="w-full pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition shadow-2xs"
             />
             {isSearching && (
@@ -221,7 +252,7 @@ export const Header: React.FC<HeaderProps> = ({
           {showSearchDropdown && searchResults.length > 0 && (
             <div className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden z-50 max-h-72 overflow-y-auto">
               <div className="p-1.5 text-[11px] text-slate-500 font-semibold border-b border-slate-100 bg-slate-50">
-                MATCHED INDIAN LOCATIONS
+                MATCHED NER &amp; INDIAN LOCATIONS
               </div>
               {searchResults.map((loc) => (
                 <button
@@ -232,7 +263,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setShowSearchDropdown(false);
                     setSearchQuery('');
                   }}
-                  className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-0 flex items-start gap-2.5 transition text-slate-800"
+                  className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-0 flex items-start gap-2.5 transition text-slate-800 cursor-pointer"
                 >
                   <MapPin className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
                   <div className="overflow-hidden">
@@ -257,7 +288,7 @@ export const Header: React.FC<HeaderProps> = ({
                 key={item.id}
                 id={`nav-${item.id}`}
                 onClick={() => onSelectTab(item.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition cursor-pointer ${
                   isActive
                     ? 'bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200 shadow-2xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -269,21 +300,21 @@ export const Header: React.FC<HeaderProps> = ({
             );
           })}
 
-          {/* Admin Tab (Role Aware) */}
+          {/* Admin Command Tab (Authority Unlocked) */}
           <button
             id="nav-admin"
             onClick={() => onSelectTab('admin')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition cursor-pointer ${
               currentTab === 'admin'
                 ? 'bg-rose-50 text-rose-700 font-semibold border border-rose-200 shadow-2xs'
-                : user?.role === 'ADMIN'
+                : isAdmin
                 ? 'text-rose-600 hover:bg-rose-50/70 font-semibold'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
             <ShieldCheck className="w-4 h-4 text-rose-600" />
             <span>Admin</span>
-            {user?.role === 'ADMIN' && (
+            {isAdmin && (
               <span className="w-2 h-2 rounded-full bg-rose-500"></span>
             )}
           </button>
@@ -295,7 +326,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="btn-report-hazard-header"
             onClick={onOpenReportModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition active:scale-95"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition active:scale-95 cursor-pointer"
           >
             <Camera className="w-4 h-4" />
             <span className="hidden sm:inline">Report Hazard</span>
@@ -309,7 +340,7 @@ export const Header: React.FC<HeaderProps> = ({
                 id="btn-user-profile-menu"
                 onClick={logout}
                 title="Log out"
-                className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-rose-600 transition"
+                className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-rose-600 transition cursor-pointer"
               >
                 <LogOut className="w-4 h-4 text-slate-500 group-hover:text-rose-600" />
               </button>
@@ -318,7 +349,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="btn-header-signin"
               onClick={onOpenAuthModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 shadow-2xs transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 shadow-2xs transition cursor-pointer"
             >
               <UserIcon className="w-4 h-4 text-slate-500" />
               <span className="hidden sm:inline">Sign In</span>
@@ -329,7 +360,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="btn-mobile-menu-toggle"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+            className="lg:hidden p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -350,7 +381,7 @@ export const Header: React.FC<HeaderProps> = ({
                   onSelectTab(item.id);
                   setMobileMenuOpen(false);
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left transition ${
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left transition cursor-pointer ${
                   isActive
                     ? 'bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200'
                     : 'text-slate-700 hover:bg-slate-100'
@@ -368,7 +399,7 @@ export const Header: React.FC<HeaderProps> = ({
               onSelectTab('admin');
               setMobileMenuOpen(false);
             }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left transition ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left transition cursor-pointer ${
               currentTab === 'admin'
                 ? 'bg-rose-50 text-rose-700 font-semibold border border-rose-200'
                 : 'text-rose-700 hover:bg-rose-50/70 font-semibold'
@@ -390,7 +421,7 @@ export const Header: React.FC<HeaderProps> = ({
                     logout();
                     setMobileMenuOpen(false);
                   }}
-                  className="text-xs text-rose-600 font-semibold hover:underline"
+                  className="text-xs text-rose-600 font-semibold hover:underline cursor-pointer"
                 >
                   Logout
                 </button>
@@ -401,7 +432,7 @@ export const Header: React.FC<HeaderProps> = ({
                   onOpenAuthModal();
                   setMobileMenuOpen(false);
                 }}
-                className="w-full text-center py-2 text-sm bg-indigo-600 hover:bg-indigo-700 font-medium rounded-lg text-white shadow-sm"
+                className="w-full text-center py-2 text-sm bg-indigo-600 hover:bg-indigo-700 font-medium rounded-lg text-white shadow-sm cursor-pointer"
               >
                 Sign In / Register
               </button>

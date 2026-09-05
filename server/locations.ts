@@ -17,10 +17,10 @@ export interface LocationPoint {
 }
 
 export const CURATED_INDIA_LOCATIONS: LocationPoint[] = [
-  // 1. North Eastern Region (NER) Prioritized
+  // 1. North Eastern Region (NER) Prioritized Hotspots (SIH-26001 Mandated)
   {
     id: 'loc_kohima',
-    name: 'Kohima (Phesama & Jotsoma Slopes)',
+    name: 'Kohima (NH-29 Phesama & Jotsoma Slopes)',
     district: 'Kohima',
     state: 'Nagaland',
     region: 'Eastern Himalayas / Northeast',
@@ -32,7 +32,7 @@ export const CURATED_INDIA_LOCATIONS: LocationPoint[] = [
   },
   {
     id: 'loc_haflong',
-    name: 'Haflong & Jatinga Valley',
+    name: 'Dima Hasao / Haflong (NH-27 Jatinga Valley)',
     district: 'Dima Hasao',
     state: 'Assam',
     region: 'Eastern Himalayas / Northeast',
@@ -44,7 +44,7 @@ export const CURATED_INDIA_LOCATIONS: LocationPoint[] = [
   },
   {
     id: 'loc_shillong',
-    name: 'Shillong (East Khasi Hills)',
+    name: 'East Khasi Hills (Shillong Corridor)',
     district: 'East Khasi Hills',
     state: 'Meghalaya',
     region: 'Eastern Himalayas / Northeast',
@@ -53,6 +53,18 @@ export const CURATED_INDIA_LOCATIONS: LocationPoint[] = [
     elevationM: 1525,
     landslideZoneCategory: 'High Susceptibility',
     criticalHighways: ['NH-6 (Guwahati-Shillong-Silchar Corridor)', 'Cherrapunji-Dawki Highway']
+  },
+  {
+    id: 'loc_serchhip',
+    name: 'Serchhip (Thenzawl - Tuikum Slopes)',
+    district: 'Serchhip',
+    state: 'Mizoram',
+    region: 'Eastern Himalayas / Northeast',
+    latitude: 23.3400,
+    longitude: 92.8500,
+    elevationM: 882,
+    landslideZoneCategory: 'Moderate Susceptibility',
+    criticalHighways: ['NH-54 (Silchar-Aizawl-Lunglei)', 'Thenzawl-Sialsuk Road']
   },
   {
     id: 'loc_gangtok',
@@ -229,6 +241,9 @@ export async function reverseGeocodeIndia(lat: number, lon: number) {
   } else if (lat >= 25.0 && lat <= 26.5 && lon >= 90.0 && lon <= 93.0) {
     state = 'Meghalaya';
     district = 'Khasi-Garo Hills';
+  } else if (lat >= 22.5 && lat <= 24.5 && lon >= 92.0 && lon <= 93.5) {
+    state = 'Mizoram';
+    district = 'Serchhip-Aizawl Hill Belt';
   } else if (lat >= 27.0 && lat <= 28.5 && lon >= 88.0 && lon <= 89.5) {
     state = 'Sikkim';
     district = 'Himalayan Ridge';

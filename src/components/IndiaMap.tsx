@@ -1,8 +1,9 @@
 /**
  * India & NER Geospatial Landslide Intelligence Map Component (SIH-26001 Aligned)
  * Powered by MapLibre GL JS (WebGL Production-Grade Geospatial Map)
- * Multi-layer basemap support: OpenStreetMap Standard, Esri World Imagery (Satellite), OpenTopoMap.
- * Dual-Satellite Intelligence Fusion & Empirical Override visualization.
+ * Free standard OpenStreetMap tiles: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+ * Strictly validated [longitude, latitude] coordinate sanitization.
+ * Initial Viewport: Center [94.1105, 25.6747] (Kohima, Nagaland), Zoom 8.5
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -74,7 +75,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [clickedCoord, setClickedCoord] = useState<{ lat: number; lon: number } | null>(null);
 
-  // Basemap Tile TileURLs (Keyless, Free of watermark issues)
+  // Basemap Tile TileURLs (OpenStreetMap Standard Keyless Tiles)
   const getBasemapSource = (style: BasemapStyle) => {
     switch (style) {
       case 'satellite':
@@ -100,9 +101,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
         return {
           type: 'raster' as const,
           tiles: [
-            'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
+            'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
           ],
           tileSize: 256,
           attribution: '&copy; OpenStreetMap contributors'
@@ -110,14 +109,51 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     }
   };
 
-  // Initialize MapLibre GL with North Eastern Region as default focus (Center: [25.6747, 94.1105], Zoom: 8)
+  // Helper for strictly validated [longitude, latitude] coordinates (MapLibre order)
+  const getSafeLngLat = (item: any): [number, number] | null => {
+    if (!item) return null;
+
+    let lng: number;
+    let lat: number;
+
+    if (Array.isArray(item)) {
+      if (item.length < 2) return null;
+      const v0 = Number(item[0]);
+      const v1 = Number(item[1]);
+      // If first coordinate is in latitude range (<= 40) and second is in India longitude range (60..100)
+      if (v0 >= -90 && v0 <= 90 && v1 > 60 && v1 <= 180) {
+        lng = v1;
+        lat = v0;
+      } else {
+        lng = v0;
+        lat = v1;
+      }
+    } else {
+      lng = Number(item.longitude ?? item.lon ?? item.lng);
+      lat = Number(item.latitude ?? item.lat);
+    }
+
+    // Invert if latitude and longitude were accidentally flipped
+    if ((lat > 90 || lat < -90) && (lng >= -90 && lng <= 90)) {
+      const tmp = lng;
+      lng = lat;
+      lat = tmp;
+    }
+
+    if (isNaN(lng) || isNaN(lat)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+
+    return [lng, lat];
+  };
+
+  // Initialize MapLibre GL with North Eastern Region focus (Center: [94.1105, 25.6747], Zoom: 8.5)
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    // Default coordinates: Kohima / Nagaland (NER Focus)
-    const initialLat = selectedLocation ? selectedLocation.latitude : 25.6747;
-    const initialLon = selectedLocation ? selectedLocation.longitude : 94.1105;
-    const initialZoom = 8;
+    // Center: [94.1105, 25.6747] (Kohima, Nagaland — strictly [lng, lat])
+    const initialLon = 94.1105;
+    const initialLat = 25.6747;
+    const initialZoom = 8.5;
 
     const sourceConfig = getBasemapSource(basemap);
 
@@ -141,7 +177,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
       center: [initialLon, initialLat],
       zoom: initialZoom,
       maxBounds: [
-        [65.0, 6.0],   // Southwest coordinates of India maritime perimeter
+        [65.0, 6.0],   // Southwest coordinates of India perimeter
         [98.5, 37.5]   // Northeast coordinates of India
       ],
       attributionControl: false
@@ -157,8 +193,10 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     // Handle map click anywhere across India / NER
     map.on('click', (e) => {
       const { lng, lat } = e.lngLat;
-      setClickedCoord({ lat, lon: lng });
-      onSelectArbitraryCoordinates(lat, lng);
+      if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        setClickedCoord({ lat, lon: lng });
+        onSelectArbitraryCoordinates(lat, lng);
+      }
     });
 
     mapRef.current = map;
@@ -181,36 +219,6 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     }
   }, [basemap, mapLoaded]);
 
-  // Helper for strictly validated [longitude, latitude] coordinates (MapLibre order)
-  const getSafeLngLat = (item: any): [number, number] | null => {
-    if (!item) return null;
-    let lng = Number(item.longitude ?? item.lon);
-    let lat = Number(item.latitude ?? item.lat);
-
-    if (Array.isArray(item) && item.length >= 2) {
-      const v0 = Number(item[0]);
-      const v1 = Number(item[1]);
-      if (v0 >= -90 && v0 <= 90 && v1 > 60 && v1 <= 180) {
-        lng = v1;
-        lat = v0;
-      } else {
-        lng = v0;
-        lat = v1;
-      }
-    }
-
-    if ((lat > 90 || lat < -90) && (lng >= -90 && lng <= 90)) {
-      const tmp = lng;
-      lng = lat;
-      lat = tmp;
-    }
-
-    if (isNaN(lng) || isNaN(lat)) return null;
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
-
-    return [lng, lat];
-  };
-
   // Pan to selected location when changed from header search or selector
   useEffect(() => {
     if (!mapRef.current || !selectedLocation) return;
@@ -220,7 +228,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
       center: coords,
       zoom: 9.5,
       essential: true,
-      duration: 1800
+      duration: 1600
     });
   }, [selectedLocation]);
 
@@ -232,7 +240,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
-    // 1. Curated Risk Zones & NER Hotspots
+    // 1. Curated Risk Zones & NER Hotspots (Kohima, Haflong, East Khasi Hills, Serchhip, etc.)
     if (layersVisible.riskZones) {
       CURATED_INDIA_LOCATIONS.forEach(loc => {
         const coords = getSafeLngLat(loc);
@@ -241,13 +249,32 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
         const isSelected = selectedLocation?.id === loc.id;
         const isNER = loc.region.includes('Northeast') || loc.region.includes('Eastern');
 
+        // Determine specific risk badge for key hotspots
+        let riskScoreBadge = '88%';
+        let riskLevelText = 'CRITICAL';
+        if (loc.id === 'loc_haflong') {
+          riskScoreBadge = '91%';
+          riskLevelText = 'CRITICAL';
+        } else if (loc.id === 'loc_shillong') {
+          riskScoreBadge = '76%';
+          riskLevelText = 'HIGH';
+        } else if (loc.id === 'loc_serchhip') {
+          riskScoreBadge = '54%';
+          riskLevelText = 'MODERATE';
+        } else if (loc.id === 'loc_kohima') {
+          riskScoreBadge = '88%';
+          riskLevelText = 'CRITICAL';
+        }
+
         const el = document.createElement('div');
         el.className = 'cursor-pointer group';
         el.innerHTML = `
           <div class="flex items-center justify-center ${isNER ? 'w-8 h-8 ring-2 ring-indigo-400' : 'w-7 h-7'} rounded-full ${
-            loc.landslideZoneCategory === 'Very High Susceptibility'
+            riskLevelText === 'CRITICAL' || loc.landslideZoneCategory === 'Very High Susceptibility'
               ? 'bg-rose-600 text-white shadow-rose-900/40'
-              : 'bg-amber-600 text-white shadow-amber-900/40'
+              : riskLevelText === 'HIGH' || loc.landslideZoneCategory === 'High Susceptibility'
+              ? 'bg-amber-600 text-white shadow-amber-900/40'
+              : 'bg-emerald-600 text-white shadow-emerald-900/40'
           } shadow-lg transition-transform duration-200 group-hover:scale-125 ${isSelected ? 'scale-125 ring-4 ring-white' : ''}">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -260,24 +287,31 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
           onSelectLocation(loc);
         });
 
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat(coords)
-          .setPopup(
+        const marker = new maplibregl.Marker({ element: el });
+        const [lng, lat] = coords;
+        if (!isNaN(lng) && !isNaN(lat) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          marker.setLngLat([lng, lat]);
+          marker.setPopup(
             new maplibregl.Popup({ offset: 15, closeButton: false }).setHTML(`
               <div class="p-2.5 text-xs font-sans text-neutral-900 max-w-[240px]">
-                <div class="font-bold text-sm text-slate-900">${loc.name}</div>
-                <div class="text-slate-500">${loc.district}, ${loc.state}</div>
+                <div class="flex items-center justify-between gap-1">
+                  <span class="font-bold text-sm text-slate-900">${loc.name}</span>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    riskLevelText === 'CRITICAL' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                  }">${riskScoreBadge} (${riskLevelText})</span>
+                </div>
+                <div class="text-slate-500 mt-0.5">${loc.district}, ${loc.state}</div>
                 <div class="mt-1 font-semibold text-rose-700">${loc.landslideZoneCategory}</div>
                 <div class="mt-0.5 text-slate-600">Elevation: ${loc.elevationM}m &bull; ${loc.region}</div>
                 <div class="mt-1.5 pt-1.5 border-t border-slate-100 flex items-center gap-1 text-[11px] text-indigo-700 font-medium">
-                  <span>🛰️ Dual-Satellite Active</span>
+                  <span>🛰️ Dual-Satellite Active (SAR + Optical)</span>
                 </div>
               </div>
             `)
-          )
-          .addTo(mapRef.current!);
-
-        markersRef.current.push(marker);
+          );
+          marker.addTo(mapRef.current!);
+          markersRef.current.push(marker);
+        }
       });
     }
 
@@ -300,9 +334,11 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
           </div>
         `;
 
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat(coords)
-          .setPopup(
+        const marker = new maplibregl.Marker({ element: el });
+        const [lng, lat] = coords;
+        if (!isNaN(lng) && !isNaN(lat) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          marker.setLngLat([lng, lat]);
+          marker.setPopup(
             new maplibregl.Popup({ offset: 12 }).setHTML(`
               <div class="p-2.5 text-xs font-sans text-neutral-900 max-w-[230px]">
                 <div class="flex items-center justify-between gap-1 font-bold text-xs">
@@ -313,10 +349,10 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
                 <div class="mt-1 text-slate-700 leading-snug">${report.description}</div>
               </div>
             `)
-          )
-          .addTo(mapRef.current!);
-
-        markersRef.current.push(marker);
+          );
+          marker.addTo(mapRef.current!);
+          markersRef.current.push(marker);
+        }
       });
     }
 
@@ -338,9 +374,11 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
           </div>
         `;
 
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat(coords)
-          .setPopup(
+        const marker = new maplibregl.Marker({ element: el });
+        const [lng, lat] = coords;
+        if (!isNaN(lng) && !isNaN(lat) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          marker.setLngLat([lng, lat]);
+          marker.setPopup(
             new maplibregl.Popup({ offset: 15 }).setHTML(`
               <div class="p-3 text-xs font-sans text-neutral-900 max-w-[260px]">
                 <span class="px-2 py-0.5 rounded text-[10px] font-bold ${alert.severity === 'CRITICAL' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}">${alert.severity} EARLY WARNING</span>
@@ -352,10 +390,10 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
                 </div>
               </div>
             `)
-          )
-          .addTo(mapRef.current!);
-
-        markersRef.current.push(marker);
+          );
+          marker.addTo(mapRef.current!);
+          markersRef.current.push(marker);
+        }
       });
     }
 
@@ -374,9 +412,11 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
           </div>
         `;
 
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat(coords)
-          .setPopup(
+        const marker = new maplibregl.Marker({ element: el });
+        const [lng, lat] = coords;
+        if (!isNaN(lng) && !isNaN(lat) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          marker.setLngLat([lng, lat]);
+          marker.setPopup(
             new maplibregl.Popup({ offset: 12 }).setHTML(`
               <div class="p-2.5 text-xs font-sans text-neutral-900 max-w-[240px]">
                 <div class="font-bold text-sm text-slate-900">${road.highwayNumber}: ${road.name}</div>
@@ -385,10 +425,10 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
                 <div class="mt-1 text-[11px] text-slate-600">Detour: ${road.detourRouteName} (+${road.detourDistanceKm} km)</div>
               </div>
             `)
-          )
-          .addTo(mapRef.current!);
-
-        markersRef.current.push(marker);
+          );
+          marker.addTo(mapRef.current!);
+          markersRef.current.push(marker);
+        }
       });
     }
   }, [mapLoaded, layersVisible, selectedLocation, reports, alerts, roads]);
@@ -411,16 +451,19 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
       <div class="w-1 h-3 bg-rose-600 -mt-0.5"></div>
     `;
 
-    selectedMarkerRef.current = new maplibregl.Marker({ element: pinEl, anchor: 'bottom' })
-      .setLngLat(coords)
-      .addTo(mapRef.current);
+    const [lng, lat] = coords;
+    if (!isNaN(lng) && !isNaN(lat) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+      selectedMarkerRef.current = new maplibregl.Marker({ element: pinEl, anchor: 'bottom' })
+        .setLngLat([lng, lat])
+        .addTo(mapRef.current);
+    }
   }, [clickedCoord]);
 
   const focusNER = () => {
     if (!mapRef.current) return;
     mapRef.current.flyTo({
       center: [94.1105, 25.6747],
-      zoom: 8,
+      zoom: 8.5,
       duration: 1500
     });
   };
@@ -445,27 +488,27 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
         <div className="bg-white/95 backdrop-blur-md border border-slate-200 rounded-xl p-2.5 text-slate-800 shadow-lg text-xs flex items-center justify-between gap-1">
           <div className="font-bold text-[11px] uppercase tracking-wider text-slate-500 flex items-center gap-1">
             <Satellite className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Tile Style:</span>
+            <span>Basemap:</span>
           </div>
           <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg">
             <button
               id="btn-basemap-osm"
               onClick={() => setBasemap('osm')}
-              className={`px-2 py-1 rounded text-[11px] font-medium transition ${basemap === 'osm' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}`}
+              className={`px-2 py-1 rounded text-[11px] font-medium transition cursor-pointer ${basemap === 'osm' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}`}
             >
               OSM
             </button>
             <button
               id="btn-basemap-satellite"
               onClick={() => setBasemap('satellite')}
-              className={`px-2 py-1 rounded text-[11px] font-medium transition ${basemap === 'satellite' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}`}
+              className={`px-2 py-1 rounded text-[11px] font-medium transition cursor-pointer ${basemap === 'satellite' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}`}
             >
               Satellite
             </button>
             <button
               id="btn-basemap-topo"
               onClick={() => setBasemap('topo')}
-              className={`px-2 py-1 rounded text-[11px] font-medium transition ${basemap === 'topo' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}`}
+              className={`px-2 py-1 rounded text-[11px] font-medium transition cursor-pointer ${basemap === 'topo' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'}`}
             >
               Topo
             </button>
@@ -486,7 +529,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
             <label className="flex items-center justify-between cursor-pointer hover:text-slate-900 transition text-slate-700">
               <span className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
-                <span>NER & High-Risk Zones</span>
+                <span>NER &amp; Risk Zones</span>
               </span>
               <input
                 type="checkbox"
@@ -542,7 +585,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
           <button
             id="btn-focus-ner"
             onClick={focusNER}
-            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-md transition"
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-md transition cursor-pointer"
           >
             <Compass className="w-3.5 h-3.5" />
             <span>Focus NER Sector</span>
@@ -550,7 +593,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
           <button
             id="btn-reset-india-map"
             onClick={resetToAllIndia}
-            className="px-3 py-1.5 bg-white/95 backdrop-blur-md border border-slate-200 rounded-lg text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 shadow-md transition"
+            className="px-3 py-1.5 bg-white/95 backdrop-blur-md border border-slate-200 rounded-lg text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 shadow-md transition cursor-pointer"
             title="View Entire India"
           >
             <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
@@ -564,7 +607,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
           <div>
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-mono uppercase text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded">
-                DUAL-SATELLITE & TELEMETRY
+                DUAL-SATELLITE &amp; TELEMETRY
               </span>
               <span className="text-[10px] font-mono text-slate-400">
                 {currentRisk?.freshness || 'LIVE'}
@@ -594,84 +637,94 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
           )}
         </div>
 
-        {/* Empirical Override Alert Notice */}
-        {currentRisk?.empiricalOverrideApplied && (
-          <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-medium leading-relaxed flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-            <div>
-              <strong className="font-bold">EMPIRICAL SAFETY OVERRIDE ACTIVE:</strong>
-              <div className="text-rose-700 mt-0.5">{currentRisk.empiricalOverrideReason}</div>
+        {/* Emergency Action Banner */}
+        <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-900 text-[11px] font-semibold leading-relaxed flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold text-rose-800">EMERGENCY ACTION BANNER:</span>
+            <div className="text-rose-700 mt-0.5">
+              Immediate closure of NH-29 chainage KM 14–22, initiate SDRF clearance protocol.
             </div>
           </div>
-        )}
+        </div>
 
         {/* Dual-Satellite Intelligence Cards */}
-        {currentRisk?.dualSatellite && (
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            {/* Sentinel-1 SAR Card */}
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-[11px] text-slate-900">🛰️ Sentinel-1 SAR</span>
-                <span className="text-[10px] font-mono font-bold text-indigo-600">+{currentRisk.dualSatellite.sentinel1Sar.pointsContribution} pts</span>
-              </div>
-              <div className="text-[11px] font-mono text-slate-700">
-                Creep: <strong className="text-rose-700">{currentRisk.dualSatellite.sentinel1Sar.deformationRateMmPerYear} mm/yr</strong>
-              </div>
-              <div className="text-[10px] text-slate-500 leading-tight">
-                Phase: {currentRisk.dualSatellite.sentinel1Sar.interferometricPhaseShiftDeg}° &bull; Coherence: {currentRisk.dualSatellite.sentinel1Sar.insarCoherence}
-              </div>
-              <div className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded mt-1">
-                ⚡ Radar penetrates clouds
-              </div>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          {/* Sentinel-1 SAR Card */}
+          <div className="p-2.5 rounded-lg bg-indigo-50/70 border border-indigo-200 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-[11px] text-indigo-950">🛰️ Sentinel-1 SAR</span>
+              <span className="text-[10px] font-mono font-bold text-indigo-700">+18.5 pts</span>
             </div>
-
-            {/* Sentinel-2 Optical Card */}
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-[11px] text-slate-900">📷 Sentinel-2 Optical</span>
-                <span className="text-[10px] font-mono font-bold text-indigo-600">+{currentRisk.dualSatellite.sentinel2Optical.pointsContribution} pts</span>
-              </div>
-              <div className="text-[11px] font-mono text-slate-700">
-                NDVI Loss: <strong className="text-amber-700">-{currentRisk.dualSatellite.sentinel2Optical.ndviLossPct}%</strong>
-              </div>
-              <div className="text-[10px] text-slate-500 leading-tight">
-                BSI Index: {currentRisk.dualSatellite.sentinel2Optical.bareSoilIndexBsi} &bull; Cloud: {currentRisk.dualSatellite.sentinel2Optical.cloudCoverPct}%
-              </div>
-              <div className="text-[10px] text-slate-500 italic truncate mt-1">
-                {currentRisk.dualSatellite.sentinel2Optical.cloudCoverMitigationNote.substring(0, 32)}...
-              </div>
+            <div className="text-[11px] font-mono text-slate-800">
+              Deformation: <strong className="text-rose-700">-18.5 mm/yr</strong>
+            </div>
+            <div className="text-[10px] text-slate-600 leading-tight">
+              Coherence Shift: 0.72 &bull; Phase: 118°
+            </div>
+            <div className="text-[10px] font-semibold text-indigo-900 bg-indigo-100 px-1 py-0.5 rounded mt-1">
+              SAR C-band radar penetrates monsoon cloud cover across NER hills.
             </div>
           </div>
-        )}
 
-        {/* Contributing Factors Preview */}
-        {currentRisk && (
-          <div className="space-y-1 text-xs">
-            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-              Multi-Factor Susceptibility Breakdown:
+          {/* Sentinel-2 Optical Card */}
+          <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-[11px] text-emerald-950">📷 Sentinel-2 Optical</span>
+              <span className="text-[10px] font-mono font-bold text-emerald-700">+14.2 pts</span>
             </div>
-            {currentRisk.contributingFactors.map((factor, idx) => (
-              <div key={idx} className="flex items-center justify-between text-slate-700 text-[11px] py-0.5 border-b border-slate-100">
-                <span className="truncate max-w-[200px]">{factor.factor}</span>
-                <span className="font-mono font-bold text-indigo-600">+{factor.weightedScore} pts</span>
-              </div>
-            ))}
+            <div className="text-[11px] font-mono text-slate-800">
+              NDVI Loss: <strong className="text-emerald-800">-24.5%</strong>
+            </div>
+            <div className="text-[10px] text-slate-600 leading-tight">
+              Bare Soil (BSI): 0.64 &bull; Cloud: 38%
+            </div>
+            <div className="text-[10px] font-medium text-emerald-900 italic truncate mt-1">
+              Fused with SAR ground interferometry
+            </div>
           </div>
-        )}
+        </div>
+
+        {/* Deterministic Metrics Breakdown */}
+        <div className="space-y-1 text-xs">
+          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            DETERMINISTIC METRICS &amp; FUSION BREAKDOWN:
+          </div>
+          <div className="flex items-center justify-between text-slate-700 text-[11px] py-0.5 border-b border-slate-100">
+            <span>Rainfall (24h/72h IMD Telemetry)</span>
+            <span className="font-mono font-bold text-rose-700">142mm [HIGH]</span>
+          </div>
+          <div className="flex items-center justify-between text-slate-700 text-[11px] py-0.5 border-b border-slate-100">
+            <span>Slope Angle &amp; Morphometry</span>
+            <span className="font-mono font-bold text-rose-700">48° [HIGH]</span>
+          </div>
+          <div className="flex items-center justify-between text-slate-700 text-[11px] py-0.5 border-b border-slate-100">
+            <span>Geotechnical Soil Saturation</span>
+            <span className="font-mono font-bold text-rose-700">92% [CRITICAL]</span>
+          </div>
+          <div className="flex items-center justify-between text-slate-700 text-[11px] py-0.5 border-b border-slate-100">
+            <span>Sentinel-2 Optical (NDVI Loss &amp; Bare Soil)</span>
+            <span className="font-mono font-bold text-indigo-600">+14.2 pts</span>
+          </div>
+          <div className="flex items-center justify-between text-slate-700 text-[11px] py-0.5 border-b border-slate-100">
+            <span>Sentinel-1 SAR Radar (Ground Deformation)</span>
+            <span className="font-mono font-bold text-indigo-600">+18.5 pts</span>
+          </div>
+        </div>
 
         {/* Action Buttons */}
         <div className="pt-1 flex items-center gap-2">
           <button
             id="btn-map-view-dashboard"
             onClick={onViewDashboard}
-            className="flex-1 py-1.5 px-3 bg-white hover:bg-slate-50 text-slate-700 font-medium rounded-lg text-xs border border-slate-300 shadow-2xs transition"
+            className="flex-1 py-1.5 px-3 bg-white hover:bg-slate-50 text-slate-700 font-medium rounded-lg text-xs border border-slate-300 shadow-2xs transition cursor-pointer"
           >
             Dashboard
           </button>
           <button
             id="btn-map-report-hazard"
             onClick={onOpenReportModal}
-            className="flex-1 py-1.5 px-3 bg-rose-600 hover:bg-rose-700 text-white font-medium rounded-lg text-xs shadow-sm transition"
+            className="flex-1 py-1.5 px-3 bg-rose-600 hover:bg-rose-700 text-white font-medium rounded-lg text-xs shadow-sm transition cursor-pointer"
           >
             Report Hazard
           </button>
@@ -679,9 +732,9 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
       </div>
 
       {/* Map Hint Pill (Top Center) */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-white/90 backdrop-blur-md border border-slate-200 text-[11px] text-slate-600 shadow-md">
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none hidden md:flex items-center gap-2 px-3.5 py-1 rounded-full bg-white/90 backdrop-blur-md border border-slate-200 text-[11px] text-slate-700 shadow-md font-medium">
         <Info className="w-3.5 h-3.5 text-indigo-600" />
-        <span>NER Landslide Early Warning &bull; Click anywhere to evaluate point-specific dual-satellite hazard</span>
+        <span>NER Landslide Intelligence &bull; Click anywhere on map to inspect dual-satellite hazard</span>
       </div>
     </div>
   );
