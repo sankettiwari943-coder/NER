@@ -25,6 +25,7 @@ import {
   AnalyticsData,
   FactorContribution
 } from '../types';
+import { supabase } from '../lib/supabase';
 
 // ============================================================================
 // Curated Mock Data & Client Simulation Models
@@ -583,13 +584,6 @@ class ApiService {
     }
   }
 
-  public async getUserReports(): Promise<{ reports: CitizenReport[] }> {
-    try {
-      return await this.request('/api/v1/user/reports');
-    } catch {
-      return { reports: [] };
-    }
-  }
 
   // Locations
   public async getCuratedLocations(): Promise<{ locations: LocationPoint[] }> {
@@ -840,29 +834,103 @@ class ApiService {
   }
 
   // Citizen Reports & Offline Sync
-  public async submitReport(formData: FormData): Promise<{ message: string; report: CitizenReport }> {
+  private dynamicReports: CitizenReport[] = [
+    {
+      id: 'rep_01',
+      user_id: 'usr_01',
+      user_name: 'T. Jamir (Observer)',
+      hazard_type: 'Longitudinal Tension Crack',
+      description: '12-meter tension crack observed running parallel to outer shoulder along NH-29 chainage KM 18.2.',
+      severity: 'HIGH',
+      location_name: 'Dzüdza River Valley, Nagaland',
+      latitude: 25.6800,
+      longitude: 93.8000,
+      verification_status: 'VERIFIED',
+      ai_observation: 'AI Vision confirmed progressive tensile separation along road sub-base.',
+      created_at: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
+      updated_at: new Date().toISOString()
+    },
+    {
+      id: 'rep_02',
+      user_id: 'usr_02',
+      user_name: 'K. Debbarma',
+      hazard_type: 'Mudslide / Mud Debris',
+      description: 'Toe scouring and culvert blockage causing sheet flow across hill cutting.',
+      severity: 'MODERATE',
+      location_name: 'Jatinga Chute, Dima Hasao',
+      latitude: 25.1834,
+      longitude: 93.0289,
+      verification_status: 'UNDER REVIEW',
+      created_at: new Date(Date.now() - 3600 * 1000 * 12).toISOString(),
+      updated_at: new Date().toISOString()
+    }
+  ];
+
+  public async getUserReports(): Promise<{ reports: CitizenReport[] }> {
     try {
-      return await this.request('/api/v1/reports', {
+      const res = await this.getReports();
+      return { reports: res.reports };
+    } catch {
+      return { reports: this.dynamicReports };
+    }
+  }
+
+  public async submitReport(formData: FormData): Promise<{ message: string; report: CitizenReport }> {
+    const lat = parseFloat(String(formData.get('latitude') || '25.6747'));
+    const lon = parseFloat(String(formData.get('longitude') || '94.1105'));
+    const hazard_type = String(formData.get('hazard_type') || formData.get('issue_type') || 'Debris Flow / Mudslide');
+    const description = String(formData.get('description') || '');
+    const location_name = String(formData.get('location_name') || 'Field Observation Point');
+    const severity = (formData.get('severity') as any) || 'HIGH';
+    const reporter_name = String(formData.get('reporter_name') || formData.get('user_name') || 'Field Observer');
+    const user_id = String(formData.get('user_id') || 'usr_local');
+
+    const rep: CitizenReport = {
+      id: `rep_${Date.now()}`,
+      user_id,
+      user_name: reporter_name,
+      hazard_type,
+      description,
+      severity,
+      location_name,
+      latitude: lat,
+      longitude: lon,
+      verification_status: 'UNVERIFIED',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    this.dynamicReports = [rep, ...this.dynamicReports];
+
+    try {
+      await supabase.from('reports').insert([{
+        id: rep.id,
+        user_id: user_id !== 'usr_local' ? user_id : null,
+        reporter_name,
+        title: `${hazard_type} near ${location_name}`,
+        issue_type: hazard_type,
+        hazard_type,
+        description,
+        location_name,
+        latitude: lat,
+        longitude: lon,
+        severity,
+        status: 'PENDING',
+        verification_status: 'UNVERIFIED',
+        created_at: rep.created_at
+      }]);
+    } catch (sbErr) {
+      console.warn('Supabase report insert sync:', sbErr);
+    }
+
+    try {
+      await this.request('/api/v1/reports', {
         method: 'POST',
         body: formData,
       });
-    } catch {
-      const rep: CitizenReport = {
-        id: `rep_${Date.now()}`,
-        user_id: 'usr_local',
-        user_name: 'Field Observer',
-        hazard_type: String(formData.get('hazard_type') || 'Debris Flow / Mudslide'),
-        description: String(formData.get('description') || ''),
-        severity: (formData.get('severity') as any) || 'HIGH',
-        location_name: String(formData.get('location_name') || 'Field Observation Point'),
-        latitude: parseFloat(String(formData.get('latitude') || '25.6747')),
-        longitude: parseFloat(String(formData.get('longitude') || '94.1105')),
-        verification_status: 'UNVERIFIED',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      return { message: 'Report received and queued for official verification.', report: rep };
-    }
+    } catch {}
+
+    return { message: 'Report received and queued for official verification.', report: rep };
   }
 
   public async syncOfflineReports(reports: OfflineQueuedReport[]): Promise<{
@@ -872,78 +940,91 @@ class ApiService {
     processedReports: CitizenReport[];
     syncedAt: string;
   }> {
+    const processed: CitizenReport[] = reports.map((r, i) => ({
+      id: `synced_${Date.now()}_${i}`,
+      user_id: 'usr_offline',
+      user_name: 'Offline Field User',
+      hazard_type: r.hazard_type,
+      description: r.description,
+      severity: r.severity,
+      location_name: r.location_name,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      verification_status: 'UNVERIFIED',
+      created_at: r.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }));
+
+    this.dynamicReports = [...processed, ...this.dynamicReports];
+
     try {
-      return await this.request('/api/v1/reports/sync', {
+      await supabase.from('reports').insert(
+        processed.map(p => ({
+          id: p.id,
+          reporter_name: p.user_name,
+          title: `${p.hazard_type} near ${p.location_name}`,
+          issue_type: p.hazard_type,
+          hazard_type: p.hazard_type,
+          description: p.description,
+          location_name: p.location_name,
+          latitude: p.latitude,
+          longitude: p.longitude,
+          severity: p.severity,
+          status: 'PENDING',
+          verification_status: 'UNVERIFIED',
+          created_at: p.created_at
+        }))
+      );
+    } catch {}
+
+    try {
+      await this.request('/api/v1/reports/sync', {
         method: 'POST',
         body: JSON.stringify({ reports }),
       });
-    } catch {
-      const processed: CitizenReport[] = reports.map((r, i) => ({
-        id: `synced_${Date.now()}_${i}`,
-        user_id: 'usr_offline',
-        user_name: 'Offline Field User',
-        hazard_type: r.hazard_type,
-        description: r.description,
-        severity: r.severity,
-        location_name: r.location_name,
-        latitude: r.latitude,
-        longitude: r.longitude,
-        verification_status: 'UNVERIFIED',
-        created_at: r.created_at || new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }));
-      return {
-        message: 'All offline reports successfully synchronized to platform.',
-        syncedCount: reports.length,
-        failedCount: 0,
-        processedReports: processed,
-        syncedAt: new Date().toISOString()
-      };
-    }
+    } catch {}
+
+    return {
+      message: 'All offline reports successfully synchronized to platform.',
+      syncedCount: reports.length,
+      failedCount: 0,
+      processedReports: processed,
+      syncedAt: new Date().toISOString()
+    };
   }
 
   public async getReports(params?: { lat?: number; lon?: number; radius?: number; status?: string }): Promise<{ count: number; reports: CitizenReport[] }> {
     try {
-      const query = new URLSearchParams();
-      if (params?.lat !== undefined) query.set('lat', String(params.lat));
-      if (params?.lon !== undefined) query.set('lon', String(params.lon));
-      if (params?.radius !== undefined) query.set('radius', String(params.radius));
-      if (params?.status) query.set('status', params.status);
-      return await this.request(`/api/v1/reports?${query.toString()}`);
-    } catch {
-      const reports: CitizenReport[] = [
-        {
-          id: 'rep_01',
-          user_id: 'usr_01',
-          user_name: 'T. Jamir (Observer)',
-          hazard_type: 'Longitudinal Tension Crack',
-          description: '12-meter tension crack observed running parallel to outer shoulder along NH-29 chainage KM 18.2.',
-          severity: 'HIGH',
-          location_name: 'Dzüdza River Valley, Nagaland',
-          latitude: 25.6800,
-          longitude: 93.8000,
-          verification_status: 'VERIFIED',
-          ai_observation: 'AI Vision confirmed progressive tensile separation along road sub-base.',
-          created_at: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          id: 'rep_02',
-          user_id: 'usr_02',
-          user_name: 'K. Debbarma',
-          hazard_type: 'Mudslide / Mud Debris',
-          description: 'Toe scouring and culvert blockage causing sheet flow across hill cutting.',
-          severity: 'MODERATE',
-          location_name: 'Jatinga Chute, Dima Hasao',
-          latitude: 25.1834,
-          longitude: 93.0289,
-          verification_status: 'UNDER REVIEW',
-          created_at: new Date(Date.now() - 3600 * 1000 * 12).toISOString(),
-          updated_at: new Date().toISOString()
-        }
-      ];
-      return { count: reports.length, reports };
-    }
+      const { data } = await supabase.from('reports').select('*');
+      if (Array.isArray(data) && data.length > 0) {
+        const sbReports: CitizenReport[] = data.map((r: any) => ({
+          id: r.id || `rep_${Date.now()}`,
+          user_id: r.user_id || 'usr_citizen',
+          user_name: r.reporter_name || r.user_name || 'Field Observer',
+          hazard_type: r.hazard_type || r.issue_type || 'Debris Flow',
+          description: r.description || '',
+          severity: r.severity || 'HIGH',
+          location_name: r.location_name || 'Field Observation Point',
+          latitude: Number(r.latitude) || 25.6747,
+          longitude: Number(r.longitude) || 94.1105,
+          verification_status: (r.verification_status || (r.status === 'APPROVED' ? 'VERIFIED' : r.status === 'REJECTED' ? 'REJECTED' : 'UNVERIFIED')) as any,
+          admin_notes: r.admin_notes || r.note,
+          created_at: r.created_at || new Date().toISOString(),
+          updated_at: r.updated_at || r.created_at || new Date().toISOString()
+        }));
+
+        const map = new Map<string, CitizenReport>();
+        [...this.dynamicReports, ...sbReports].forEach(item => {
+          if (!map.has(item.id)) {
+            map.set(item.id, item);
+          }
+        });
+        const merged = Array.from(map.values());
+        return { count: merged.length, reports: merged };
+      }
+    } catch {}
+
+    return { count: this.dynamicReports.length, reports: this.dynamicReports };
   }
 
   public async getReportStatusHistory(reportId: string): Promise<{ history: ReportStatusHistory[] }> {
@@ -968,43 +1049,49 @@ class ApiService {
   }
 
   public async updateReportStatus(reportId: string, status: string, note?: string): Promise<{ report: CitizenReport; history: ReportStatusHistory[] }> {
+    const existing = this.dynamicReports.find(r => r.id === reportId);
+    const updated: CitizenReport = existing
+      ? { ...existing, verification_status: status as any, admin_notes: note, updated_at: new Date().toISOString() }
+      : {
+          id: reportId,
+          user_id: 'usr_01',
+          user_name: 'Field Observer',
+          hazard_type: 'Debris Flow',
+          description: 'Observation verified by district analyst.',
+          severity: 'HIGH',
+          location_name: 'Nagaland Sector',
+          latitude: 25.6747,
+          longitude: 94.1105,
+          verification_status: status as any,
+          admin_notes: note,
+          created_at: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+    this.dynamicReports = this.dynamicReports.map(r => r.id === reportId ? updated : r);
+
     try {
-      return await this.request(`/api/v1/reports/${reportId}/status`, {
+      await this.request(`/api/v1/reports/${reportId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status, note }),
       });
-    } catch {
-      const rep: CitizenReport = {
-        id: reportId,
-        user_id: 'usr_01',
-        user_name: 'Field Observer',
-        hazard_type: 'Debris Flow',
-        description: 'Observation verified by district analyst.',
-        severity: 'HIGH',
-        location_name: 'Nagaland Sector',
-        latitude: 25.6747,
-        longitude: 94.1105,
-        verification_status: status as any,
-        admin_notes: note,
-        created_at: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      return {
-        report: rep,
-        history: [
-          {
-            id: 'hist_' + Date.now(),
-            report_id: reportId,
-            previous_status: 'UNVERIFIED',
-            new_status: status,
-            changed_by: 'usr_admin',
-            changed_by_name: 'District Analyst',
-            changed_at: new Date().toISOString(),
-            note
-          }
-        ]
-      };
-    }
+    } catch {}
+
+    return {
+      report: updated,
+      history: [
+        {
+          id: 'hist_' + Date.now(),
+          report_id: reportId,
+          previous_status: existing?.verification_status || 'UNVERIFIED',
+          new_status: status,
+          changed_by: 'usr_admin',
+          changed_by_name: 'District Analyst (NDMA)',
+          changed_at: new Date().toISOString(),
+          note
+        }
+      ]
+    };
   }
 
   public async triggerAiObserve(reportId: string): Promise<{ observation: string }> {

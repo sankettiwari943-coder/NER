@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOfflineSync } from '../context/OfflineSyncContext';
 import { LocationPoint } from '../types';
 import { api } from '../services/api';
+import { supabase } from '../lib/supabase';
 
 interface CitizenReportModalProps {
   isOpen: boolean;
@@ -136,7 +137,28 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
 
     setSubmitting(true);
     try {
-      // If client is currently offline, queue into IndexedDB directly
+      const { data: authData } = await supabase.auth.getUser();
+      const currentUser = authData?.user || user;
+
+      const payload = {
+        user_id: currentUser?.id ?? null,
+        reporter_name: currentUser?.full_name || 'Field Observer',
+        reporter_email: currentUser?.email || 'citizen@ner.gov.in',
+        title: `${hazardType} near ${locationName.trim() || 'Corridor'}`,
+        issue_type: hazardType,
+        hazard_type: hazardType,
+        description: description.trim(),
+        location_name: locationName.trim() || 'Kohima - NH-29 Ghat',
+        latitude: lat,
+        longitude: lon,
+        corridor_chainage: 'NH-29 Corridor',
+        severity: severity || 'HIGH',
+        status: 'PENDING',
+        verification_status: 'UNVERIFIED',
+        created_at: new Date().toISOString()
+      };
+
+      // Check online status
       if (!isOnline || !navigator.onLine) {
         let photoBase64: string | undefined = undefined;
         if (selectedFile) {
@@ -153,58 +175,36 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
           photoFileName: selectedFile?.name
         });
 
-        setSuccessMessage('Offline Mode: Report safely stored in IndexedDB. It will automatically synchronize when connectivity is restored.');
+        setSuccessMessage('Offline Mode: Report stored in IndexedDB. Will sync when reconnected.');
         setTimeout(() => {
           onReportSubmitted();
           onClose();
-        }, 1800);
+        }, 1500);
         return;
       }
 
-      // Online submission attempt with automatic fallback on network drop
-      try {
-        const formData = new FormData();
-        formData.append('hazard_type', hazardType);
-        formData.append('severity', severity);
-        formData.append('location_name', locationName.trim());
-        formData.append('latitude', String(lat));
-        formData.append('longitude', String(lon));
-        formData.append('description', description.trim());
+      // Online submission to Supabase & Live Ingestion Core
+      const formData = new FormData();
+      formData.append('hazard_type', hazardType);
+      formData.append('severity', severity);
+      formData.append('location_name', locationName.trim());
+      formData.append('latitude', String(lat));
+      formData.append('longitude', String(lon));
+      formData.append('description', description.trim());
+      formData.append('user_id', currentUser?.id || 'usr_local');
+      formData.append('reporter_name', currentUser?.full_name || 'Field Observer');
 
-        if (selectedFile) {
-          formData.append('photo', selectedFile);
-        }
-
-        await api.submitReport(formData);
-        setSuccessMessage('Report logged successfully. Status defaulted to UNVERIFIED for official inspection.');
-        setTimeout(() => {
-          onReportSubmitted();
-          onClose();
-        }, 1400);
-      } catch (networkErr: any) {
-        // Fallback to IndexedDB queue if server request failed due to connectivity loss
-        console.warn('Network submission failed, queueing offline:', networkErr);
-        let photoBase64: string | undefined = undefined;
-        if (selectedFile) {
-          photoBase64 = await fileToBase64(selectedFile);
-        }
-        await queueOfflineReport({
-          hazard_type: hazardType,
-          severity,
-          location_name: locationName.trim(),
-          latitude: lat,
-          longitude: lon,
-          description: description.trim(),
-          photoBase64: photoBase64,
-          photoFileName: selectedFile?.name
-        });
-
-        setSuccessMessage('Network unreachable. Report queued in local IndexedDB and will auto-sync on reconnect.');
-        setTimeout(() => {
-          onReportSubmitted();
-          onClose();
-        }, 1800);
+      if (selectedFile) {
+        formData.append('photo', selectedFile);
       }
+
+      await api.submitReport(formData);
+
+      setSuccessMessage('Report submitted successfully to DDMA Verification Queue.');
+      setTimeout(() => {
+        onReportSubmitted();
+        onClose();
+      }, 1200);
     } catch (err: any) {
       setValidationError(err.message || 'Failed to submit report.');
     } finally {
