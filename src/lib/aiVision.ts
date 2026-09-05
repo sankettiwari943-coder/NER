@@ -11,102 +11,123 @@ export async function analyzeFieldImage(imageBase64: string): Promise<VisionResu
     return {
       isValidTerrain: false,
       statusBadge: 'IRRELEVANT MEDIA DETECTED',
-      assessmentText: 'No image provided for visual verification.'
+      assessmentText: 'No image evidence provided.'
     };
   }
 
   const apiKey =
     (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY)
       ? import.meta.env.VITE_GEMINI_API_KEY
+      : (typeof window !== 'undefined' && (window as any).__ENV__?.VITE_GEMINI_API_KEY)
+      ? (window as any).__ENV__.VITE_GEMINI_API_KEY
+      : (typeof process !== 'undefined' && (process.env?.VITE_GEMINI_API_KEY || process.env?.GEMINI_API_KEY))
+      ? (process.env?.VITE_GEMINI_API_KEY || process.env?.GEMINI_API_KEY)
       : '';
 
-  // 1. Attempt Gemini 1.5 Flash live multimodal evaluation
-  if (apiKey && (apiKey.startsWith('AIzaSy') || apiKey.length > 20)) {
-    try {
-      const cleanBase64 = imageBase64.replace(/^data:image\/[a-z0-9.+_-]+;base64,/, '');
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `You are an expert geotechnical disaster auditor for the Geological Survey of India (GSI) / NDMA.
-Analyze this field photograph:
-
-CRITERIA:
-1. "FIELD FAILURE VERIFIED":
-   - Mudslides, rockfalls, slope displacement, blocked highway corridors, erosion scarps, or SDRF/NDRF search and rescue teams deployed at a disaster zone.
-   - Even if people, rescue teams in uniforms, or vehicles are present, if they are situated in an outdoor mud/landslide environment, it is VALID FIELD EVIDENCE.
-
-2. "IRRELEVANT MEDIA DETECTED":
-   - Close-up personal selfies, memes, indoor household/office settings, screenshots of text/documents, or cars parked on normal paved streets with zero slope damage.
-
-Respond STRICTLY in this JSON format without markdown backticks:
-{
-  "isValidTerrain": true,
-  "statusBadge": "FIELD FAILURE VERIFIED",
-  "assessmentText": "AI VISION AUDIT: Authentic terrain failure confirmed. [Describe visible mudflow, fallen trees, or rescue operations]. Threat Level: CRITICAL. Recommended Action: Maintain cordon and sustain emergency clearance."
-}`
-                  },
-                  {
-                    inline_data: {
-                      mime_type: 'image/jpeg',
-                      data: cleanBase64
-                    }
-                  }
-                ]
-              }
-            ]
-          })
-        }
-      );
-
-      const data = await response.json();
-
-      if (data.error) {
-        console.error('Gemini API Error details:', data.error);
-        throw new Error(data.error.message);
-      }
-
-      const rawReply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-      const cleanJson = rawReply.replace(/```json|```/g, '').trim();
-
-      let parsed: any = null;
-      try {
-        parsed = JSON.parse(cleanJson);
-      } catch {
-        const jsonMatch = rawReply.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            parsed = JSON.parse(jsonMatch[0]);
-          } catch {}
-        }
-      }
-
-      if (parsed) {
-        return {
-          isValidTerrain: Boolean(parsed.isValidTerrain),
-          statusBadge: (parsed.statusBadge === 'FIELD FAILURE VERIFIED' || parsed.isValidTerrain)
-            ? 'FIELD FAILURE VERIFIED'
-            : 'IRRELEVANT MEDIA DETECTED',
-          assessmentText: parsed.assessmentText || rawReply
-        };
-      }
-    } catch (err) {
-      console.warn('Live API request failed, applying geotechnical evaluation fallback:', err);
-    }
+  if (!apiKey || apiKey.trim() === '') {
+    return {
+      isValidTerrain: false,
+      statusBadge: 'IRRELEVANT MEDIA DETECTED',
+      assessmentText: 'API Key Missing: VITE_GEMINI_API_KEY is required for vision audits. Please configure in .env.'
+    };
   }
 
-  // 2. Resilient Evaluator Fallback:
-  // Ensures presentations and evaluations succeed without crashing if the external API key is invalid or rate-limited
-  return {
-    isValidTerrain: true,
-    statusBadge: 'FIELD FAILURE VERIFIED',
-    assessmentText: 'AI VISION AUDIT: Authentic terrain failure and active search-and-rescue operation verified. Unsorted colluvial debris deposit, uprooted timber, and severe slope destabilization detected. Threat Level: CRITICAL. Recommended Action: Coordinate with BRO and SDRF for rapid corridor clearance.'
-  };
+  try {
+    const cleanBase64 = imageBase64.replace(/^data:image\/[a-z0-9.+_-]+;base64,/, '');
+
+    const response = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey.trim()
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `You are an expert geotechnical computer vision auditor for the Geological Survey of India (GSI) and NDMA.
+Analyze this citizen-submitted field hazard photo.
+
+EVALUATION RULES:
+1. "IRRELEVANT MEDIA DETECTED":
+   - Human portraits, selfies, close-ups of faces, vehicle interiors, dashboards, pets, food, memes, indoor rooms, screenshots, or documents.
+   - Return this exact JSON:
+   {
+     "isValidTerrain": false,
+     "statusBadge": "IRRELEVANT MEDIA DETECTED",
+     "assessmentText": "AI VISION AUDIT: The uploaded image contains non-geotechnical subject matter (human subject / vehicle interior / indoor scene). Zero geological slope failure detected. Submission flagged as invalid."
+   }
+
+2. "FIELD FAILURE VERIFIED":
+   - Outdoor mountain slopes, rockfalls, mudslides, debris flow runouts, soil liquefaction, slope scarps, or rescue operations at an outdoor landslide site.
+   - Return this exact JSON:
+   {
+     "isValidTerrain": true,
+     "statusBadge": "FIELD FAILURE VERIFIED",
+     "assessmentText": "AI VISION AUDIT: Authentic terrain failure confirmed. Visible mass movement, rock detachment, or mudflow across corridor. Threat Level: CRITICAL. Recommended Action: Coordinate immediate SDRF clearance and road diversion."
+   }
+
+Return ONLY clean, raw JSON. Do not wrap in markdown or backticks.`
+                },
+                {
+                  inline_data: {
+                    mime_type: 'image/jpeg',
+                    data: cleanBase64
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error('Gemini API Error:', data.error);
+      return {
+        isValidTerrain: false,
+        statusBadge: 'IRRELEVANT MEDIA DETECTED',
+        assessmentText: `Gemini API Error: ${data.error.message}`
+      };
+    }
+
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+    const cleanJson = rawText.replace(/```json|```/g, '').trim();
+
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(cleanJson);
+    } catch {
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          parsed = JSON.parse(jsonMatch[0]);
+        } catch {}
+      }
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      return {
+        isValidTerrain: Boolean(parsed.isValidTerrain),
+        statusBadge: (parsed.statusBadge === 'FIELD FAILURE VERIFIED' || parsed.isValidTerrain)
+          ? 'FIELD FAILURE VERIFIED'
+          : 'IRRELEVANT MEDIA DETECTED',
+        assessmentText: parsed.assessmentText || rawText
+      };
+    }
+
+    return JSON.parse(cleanJson);
+  } catch (err: any) {
+    console.error('Vision inspection pipeline error:', err);
+    return {
+      isValidTerrain: false,
+      statusBadge: 'IRRELEVANT MEDIA DETECTED',
+      assessmentText: 'AI Vision analysis could not complete. Image flagged for manual inspector review.'
+    };
+  }
 }
