@@ -213,65 +213,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // 1. Dedicated Reject Function
-  const handleForceReject = async () => {
-    if (!selectedReport) return;
+  // 1. Dedicated Reject Function with .select() verification
+  const handleRejectReport = async () => {
+    if (!selectedReport?.id) {
+      alert("Error: No report selected.");
+      return;
+    }
+
     const targetId = selectedReport.id;
-    const noteText = (auditNote || reviewNote).trim() || 'Submission rejected by Landslide Officer: Invalid or irrelevant media.';
+    const reason = (auditNote || reviewNote)?.trim() || "Rejected: False or irrelevant submission.";
 
-    // Immediate UI update
-    setSelectedReport((prev: any) => ({
-      ...prev,
-      status: 'REJECTED',
-      verification_status: 'REJECTED',
-      state: 'REJECTED',
-      audit_trail: [
-        {
-          previous_status: prev?.status || prev?.verification_status || prev?.state || 'UNVERIFIED',
-          new_status: 'REJECTED',
-          officer: 'District Landslide Officer',
-          note: noteText,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        },
-        ...(prev?.audit_trail || [])
-      ]
-    }));
-
-    // Update status history UI
-    setStatusHistory((prev) => [
-      {
-        id: 'hist_' + Date.now(),
-        report_id: targetId,
-        previous_status: selectedReport?.verification_status || selectedReport?.status || (selectedReport as any)?.state || 'UNVERIFIED',
-        new_status: 'REJECTED',
-        changed_by: 'usr_admin',
-        changed_by_name: 'District Landslide Officer',
-        changed_at: new Date().toISOString(),
-        note: noteText
-      },
-      ...prev
-    ]);
-
-    setLocalReports((prev: any[]) =>
-      prev.map((r) =>
-        r.id === targetId ? { ...r, status: 'REJECTED', verification_status: 'REJECTED', state: 'REJECTED', official_notes: noteText } : r
-      )
-    );
-
-    setReviewNote('');
-    setAuditNote('');
-
-    // Persist to Supabase
     try {
-      await supabase
+      // 1. Send update with .select() to verify rows affected
+      const { data, error } = await supabase
         .from('reports')
         .update({
           status: 'REJECTED',
           verification_status: 'REJECTED',
-          official_notes: noteText,
+          official_notes: reason,
           updated_at: new Date().toISOString()
         })
-        .eq('id', targetId);
+        .eq('id', targetId)
+        .select();
+
+      if (error) {
+        console.error("Supabase write error:", error);
+        alert("Database error: " + error.message);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        alert("⚠️ Update failed: 0 rows affected. Check your Supabase RLS policies on the 'reports' table!");
+        return;
+      }
+
+      // 2. State update upon confirmed database write
+      setSelectedReport((prev: any) => ({
+        ...prev,
+        status: 'REJECTED',
+        verification_status: 'REJECTED',
+        state: 'REJECTED',
+        official_notes: reason,
+        audit_trail: [
+          {
+            previous_status: prev?.status || prev?.verification_status || 'UNVERIFIED',
+            new_status: 'REJECTED',
+            officer: 'District Landslide Officer',
+            note: reason,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          },
+          ...(prev?.audit_trail || [])
+        ]
+      }));
+
+      setStatusHistory((prev) => [
+        {
+          id: 'hist_' + Date.now(),
+          report_id: targetId,
+          previous_status: selectedReport?.verification_status || selectedReport?.status || 'UNVERIFIED',
+          new_status: 'REJECTED',
+          changed_by: 'usr_admin',
+          changed_by_name: 'District Landslide Officer',
+          changed_at: new Date().toISOString(),
+          note: reason
+        },
+        ...prev
+      ]);
+
+      setLocalReports((prevList: any[]) =>
+        prevList.map((r) =>
+          r.id === targetId ? { ...r, status: 'REJECTED', verification_status: 'REJECTED', state: 'REJECTED', official_notes: reason } : r
+        )
+      );
 
       try {
         await supabase.from('status_audit_trail').insert([{
@@ -279,71 +292,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           previous_status: selectedReport?.status || selectedReport?.verification_status || 'UNVERIFIED',
           new_status: 'REJECTED',
           officer_title: 'District Landslide Officer',
-          notes: noteText,
+          notes: reason,
           timestamp: new Date().toISOString()
         }]);
       } catch {}
 
       try {
-        await api.updateReportStatus(targetId, 'REJECTED', noteText);
+        await api.updateReportStatus(targetId, 'REJECTED', reason);
       } catch {}
 
+      setReviewNote('');
+      setAuditNote('');
       onRefreshData();
-    } catch (err) {
-      console.error('Failed to update Supabase status:', err);
+      alert("✅ Successfully updated database: Report marked as REJECTED!");
+    } catch (err: any) {
+      console.error("Critical reject handler failure:", err);
+      alert("System error: " + err.message);
     }
   };
 
-  const handleRejectReport = handleForceReject;
+  const handleForceReject = handleRejectReport;
 
-  // 2. Dedicated Verify Function
+  // 2. Dedicated Verify Function with .select() verification
   const handleForceVerify = async () => {
-    if (!selectedReport) return;
+    if (!selectedReport?.id) {
+      alert("Error: No report selected.");
+      return;
+    }
     const targetId = selectedReport.id;
     const noteText = (auditNote || reviewNote).trim() || 'Verified with GSI satellite radar deformation match.';
 
-    setSelectedReport((prev: any) => ({
-      ...prev,
-      status: 'VERIFIED',
-      verification_status: 'VERIFIED',
-      state: 'VERIFIED',
-      audit_trail: [
-        {
-          previous_status: prev?.status || prev?.verification_status || prev?.state || 'UNVERIFIED',
-          new_status: 'VERIFIED',
-          officer: 'District Landslide Officer',
-          note: noteText,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        },
-        ...(prev?.audit_trail || [])
-      ]
-    }));
-
-    setStatusHistory((prev) => [
-      {
-        id: 'hist_' + Date.now(),
-        report_id: targetId,
-        previous_status: selectedReport?.verification_status || selectedReport?.status || (selectedReport as any)?.state || 'UNVERIFIED',
-        new_status: 'VERIFIED',
-        changed_by: 'usr_admin',
-        changed_by_name: 'District Landslide Officer',
-        changed_at: new Date().toISOString(),
-        note: noteText
-      },
-      ...prev
-    ]);
-
-    setLocalReports((prev: any[]) =>
-      prev.map((r) =>
-        r.id === targetId ? { ...r, status: 'VERIFIED', verification_status: 'VERIFIED', state: 'VERIFIED', official_notes: noteText } : r
-      )
-    );
-
-    setReviewNote('');
-    setAuditNote('');
-
     try {
-      await supabase
+      const { data, error } = await supabase
         .from('reports')
         .update({
           status: 'VERIFIED',
@@ -351,7 +331,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           official_notes: noteText,
           updated_at: new Date().toISOString()
         })
-        .eq('id', targetId);
+        .eq('id', targetId)
+        .select();
+
+      if (error) {
+        console.error("Supabase write error:", error);
+        alert("Database error: " + error.message);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        alert("⚠️ Update failed: 0 rows affected. Check your Supabase RLS policies on the 'reports' table!");
+        return;
+      }
+
+      setSelectedReport((prev: any) => ({
+        ...prev,
+        status: 'VERIFIED',
+        verification_status: 'VERIFIED',
+        state: 'VERIFIED',
+        official_notes: noteText,
+        audit_trail: [
+          {
+            previous_status: prev?.status || prev?.verification_status || 'UNVERIFIED',
+            new_status: 'VERIFIED',
+            officer: 'District Landslide Officer',
+            note: noteText,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          },
+          ...(prev?.audit_trail || [])
+        ]
+      }));
+
+      setStatusHistory((prev) => [
+        {
+          id: 'hist_' + Date.now(),
+          report_id: targetId,
+          previous_status: selectedReport?.verification_status || selectedReport?.status || 'UNVERIFIED',
+          new_status: 'VERIFIED',
+          changed_by: 'usr_admin',
+          changed_by_name: 'District Landslide Officer',
+          changed_at: new Date().toISOString(),
+          note: noteText
+        },
+        ...prev
+      ]);
+
+      setLocalReports((prev: any[]) =>
+        prev.map((r) =>
+          r.id === targetId ? { ...r, status: 'VERIFIED', verification_status: 'VERIFIED', state: 'VERIFIED', official_notes: noteText } : r
+        )
+      );
 
       try {
         await supabase.from('status_audit_trail').insert([{
@@ -368,9 +398,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         await api.updateReportStatus(targetId, 'VERIFIED', noteText);
       } catch {}
 
+      setReviewNote('');
+      setAuditNote('');
       onRefreshData();
-    } catch (err) {
-      console.error('Failed to update Supabase status:', err);
+      alert("✅ Successfully updated database: Report marked as VERIFIED!");
+    } catch (err: any) {
+      console.error("Critical verify handler failure:", err);
+      alert("System error: " + err.message);
     }
   };
 
@@ -985,101 +1019,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button
                       id="btn-admin-reject"
                       type="button"
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-
-                        if (!selectedReport?.id) {
-                          alert("No report currently active to reject!");
-                          return;
-                        }
-
-                        const currentId = selectedReport.id;
-                        const rejectReason = (auditNote || reviewNote)?.trim() || "Rejected: False field report.";
-
-                        // 1. Force state updates immediately
-                        setSelectedReport((prev: any) => ({
-                          ...prev,
-                          status: 'REJECTED',
-                          verification_status: 'REJECTED',
-                          state: 'REJECTED',
-                          official_notes: rejectReason,
-                          audit_trail: [
-                            {
-                              previous_status: prev?.status || prev?.verification_status || 'UNVERIFIED',
-                              new_status: 'REJECTED',
-                              officer: 'District Landslide Officer',
-                              note: rejectReason,
-                              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                            },
-                            ...(prev?.audit_trail || [])
-                          ]
-                        }));
-
-                        setLocalReports((prev: any[]) =>
-                          prev.map((item) =>
-                            item.id === currentId
-                              ? { ...item, status: 'REJECTED', verification_status: 'REJECTED', state: 'REJECTED', official_notes: rejectReason }
-                              : item
-                          )
-                        );
-
-                        setStatusHistory((prev) => [
-                          {
-                            id: 'hist_' + Date.now(),
-                            report_id: currentId,
-                            previous_status: selectedReport?.verification_status || selectedReport?.status || 'UNVERIFIED',
-                            new_status: 'REJECTED',
-                            changed_by: 'usr_admin',
-                            changed_by_name: 'District Landslide Officer',
-                            changed_at: new Date().toISOString(),
-                            note: rejectReason
-                          },
-                          ...prev
-                        ]);
-
-                        setReviewNote('');
-                        setAuditNote('');
-
-                        // 2. Direct database update
-                        const { error } = await supabase
-                          .from('reports')
-                          .update({
-                            status: 'REJECTED',
-                            verification_status: 'REJECTED',
-                            official_notes: rejectReason,
-                            updated_at: new Date().toISOString()
-                          })
-                          .eq('id', currentId);
-
-                        try {
-                          await supabase.from('status_audit_trail').insert([{
-                            report_id: currentId,
-                            previous_status: selectedReport?.status || selectedReport?.verification_status || 'UNVERIFIED',
-                            new_status: 'REJECTED',
-                            officer_title: 'District Landslide Officer',
-                            notes: rejectReason,
-                            timestamp: new Date().toISOString()
-                          }]);
-                        } catch {}
-
-                        try {
-                          await api.updateReportStatus(currentId, 'REJECTED', rejectReason);
-                        } catch {}
-
-                        onRefreshData();
-
-                        if (error) {
-                          alert("Supabase rejected update: " + error.message);
-                        } else {
-                          alert("Report #" + currentId + " successfully marked as REJECTED!");
-                        }
-                      }}
-                      style={{ cursor: 'pointer', zIndex: 9999 }}
-                      className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 border-red-400 bg-red-100 hover:bg-red-200 text-red-800 font-bold transition cursor-pointer"
+                      onClick={handleRejectReport}
+                      disabled={actionLoading}
+                      className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium transition cursor-pointer"
                     >
-                      <XCircle className="w-4 h-4 text-red-600"/>
-                      <span>❌ Reject (False Report)</span>
+                      <XCircle className="w-4 h-4 text-red-500"/>
+                      <span>Reject (False Report)</span>
                     </button>
                     <button
                       id="btn-admin-resolve"
