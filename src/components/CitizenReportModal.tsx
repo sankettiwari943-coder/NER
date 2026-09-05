@@ -48,6 +48,7 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
   const [description, setDescription] = useState('');
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -87,6 +88,13 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
     setSelectedFile(file);
     const objectUrl = URL.createObjectURL(file);
     setPreviewUrl(objectUrl);
+
+    // Encode Base64
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImageBase64(reader.result as string);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleUseDeviceLocation = () => {
@@ -184,6 +192,13 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
       }
 
       // Online submission to Supabase & Live Ingestion Core
+      let photoDataUrl = imageBase64;
+      if (!photoDataUrl && selectedFile) {
+        try {
+          photoDataUrl = await fileToBase64(selectedFile);
+        } catch {}
+      }
+
       const reportPayload = {
         user_id: currentUser ? currentUser.id : null,
         reporter_name: currentUser?.full_name || 'Field Observer',
@@ -197,6 +212,8 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
         longitude: lon,
         corridor_chainage: 'NH-29 Corridor',
         description: description.trim(),
+        photo_url: photoDataUrl || null,
+        image_url: photoDataUrl || null,
         status: 'PENDING',
         verification_status: 'UNVERIFIED',
         created_at: new Date().toISOString()
@@ -224,6 +241,10 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
       formData.append('user_id', currentUser?.id || 'usr_local');
       formData.append('reporter_name', currentUser?.full_name || 'Field Observer');
       formData.append('reporter_email', currentUser?.email || 'citizen@ner.gov.in');
+      if (photoDataUrl) {
+        formData.append('photo_url', photoDataUrl);
+        formData.append('image_url', photoDataUrl);
+      }
 
       if (selectedFile) {
         formData.append('photo', selectedFile);
@@ -232,6 +253,9 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
       await api.submitReport(formData);
 
       setSuccessMessage('Report submitted successfully to DDMA Verification Queue.');
+      setSelectedFile(null);
+      setImageBase64(null);
+      setPreviewUrl(null);
       setTimeout(() => {
         onReportSubmitted();
         onClose();

@@ -158,6 +158,8 @@ export interface CitizenReport {
   latitude: number;
   longitude: number;
   photo_url?: string;
+  image_url?: string;
+  photo?: string;
   photo_storage_key?: string;
   verification_status: 'UNVERIFIED' | 'UNDER REVIEW' | 'VERIFIED' | 'REJECTED' | 'RESOLVED';
   ai_observation?: string;

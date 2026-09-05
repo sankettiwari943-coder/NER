@@ -862,6 +862,7 @@ class ApiService {
           location_name: r.location_name || 'Field Observation Point',
           latitude: Number(r.latitude) || 25.6747,
           longitude: Number(r.longitude) || 94.1105,
+          photo_url: r.photo_url || r.image_url || r.photo || r.imageBase64 || undefined,
           verification_status: (r.verification_status || (r.status === 'APPROVED' ? 'VERIFIED' : r.status === 'REJECTED' ? 'REJECTED' : 'UNVERIFIED')) as any,
           admin_notes: r.admin_notes || r.note,
           created_at: r.created_at || new Date().toISOString(),
@@ -888,7 +889,9 @@ class ApiService {
     const location_name = String(formData.get('location_name') || 'Field Observation Point');
     const severity = (formData.get('severity') as any) || 'HIGH';
     const reporter_name = String(formData.get('reporter_name') || formData.get('user_name') || 'Field Observer');
+    const reporter_email = String(formData.get('reporter_email') || '');
     const user_id = String(formData.get('user_id') || 'usr_local');
+    const photo_url = String(formData.get('photo_url') || formData.get('image_url') || '');
 
     const rep: CitizenReport = {
       id: `rep_${Date.now()}`,
@@ -900,6 +903,7 @@ class ApiService {
       location_name,
       latitude: lat,
       longitude: lon,
+      photo_url: photo_url || undefined,
       verification_status: 'UNVERIFIED',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -912,13 +916,16 @@ class ApiService {
         id: rep.id,
         user_id: user_id !== 'usr_local' ? user_id : null,
         reporter_name,
-        title: `${hazard_type} near ${location_name}`,
+        reporter_email: reporter_email || null,
+        title: `${hazard_type} at ${location_name}`,
         issue_type: hazard_type,
         hazard_type,
         description,
         location_name,
         latitude: lat,
         longitude: lon,
+        photo_url: photo_url || null,
+        image_url: photo_url || null,
         severity,
         status: 'PENDING',
         verification_status: 'UNVERIFIED',
@@ -1012,6 +1019,7 @@ class ApiService {
           location_name: r.location_name || 'Field Observation Point',
           latitude: Number(r.latitude) || 25.6747,
           longitude: Number(r.longitude) || 94.1105,
+          photo_url: r.photo_url || r.image_url || r.photo || r.imageBase64 || undefined,
           verification_status: (r.verification_status || (r.status === 'APPROVED' ? 'VERIFIED' : r.status === 'REJECTED' ? 'REJECTED' : 'UNVERIFIED')) as any,
           admin_notes: r.admin_notes || r.note,
           created_at: r.created_at || new Date().toISOString(),
