@@ -146,7 +146,18 @@ const AppContent: React.FC = () => {
 
   // Handle road location zoom
   const handleSelectRoadLocation = (coords: [number, number]) => {
-    handleSelectArbitraryCoordinates(coords[1], coords[0]);
+    const c0 = Number(coords[0]);
+    const c1 = Number(coords[1]);
+    let lat = c0;
+    let lon = c1;
+    if (c0 > 60 && c1 <= 40) {
+      lon = c0;
+      lat = c1;
+    } else if (c1 > 60 && c0 <= 40) {
+      lat = c0;
+      lon = c1;
+    }
+    handleSelectArbitraryCoordinates(lat, lon);
     setCurrentTab('map');
   };
 

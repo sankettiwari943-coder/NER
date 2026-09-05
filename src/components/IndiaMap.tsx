@@ -181,11 +181,43 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     }
   }, [basemap, mapLoaded]);
 
+  // Helper for strictly validated [longitude, latitude] coordinates (MapLibre order)
+  const getSafeLngLat = (item: any): [number, number] | null => {
+    if (!item) return null;
+    let lng = Number(item.longitude ?? item.lon);
+    let lat = Number(item.latitude ?? item.lat);
+
+    if (Array.isArray(item) && item.length >= 2) {
+      const v0 = Number(item[0]);
+      const v1 = Number(item[1]);
+      if (v0 >= -90 && v0 <= 90 && v1 > 60 && v1 <= 180) {
+        lng = v1;
+        lat = v0;
+      } else {
+        lng = v0;
+        lat = v1;
+      }
+    }
+
+    if ((lat > 90 || lat < -90) && (lng >= -90 && lng <= 90)) {
+      const tmp = lng;
+      lng = lat;
+      lat = tmp;
+    }
+
+    if (isNaN(lng) || isNaN(lat)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+
+    return [lng, lat];
+  };
+
   // Pan to selected location when changed from header search or selector
   useEffect(() => {
     if (!mapRef.current || !selectedLocation) return;
+    const coords = getSafeLngLat(selectedLocation);
+    if (!coords) return;
     mapRef.current.flyTo({
-      center: [selectedLocation.longitude, selectedLocation.latitude],
+      center: coords,
       zoom: 9.5,
       essential: true,
       duration: 1800
@@ -203,6 +235,9 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     // 1. Curated Risk Zones & NER Hotspots
     if (layersVisible.riskZones) {
       CURATED_INDIA_LOCATIONS.forEach(loc => {
+        const coords = getSafeLngLat(loc);
+        if (!coords) return;
+
         const isSelected = selectedLocation?.id === loc.id;
         const isNER = loc.region.includes('Northeast') || loc.region.includes('Eastern');
 
@@ -226,7 +261,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
         });
 
         const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([loc.longitude, loc.latitude])
+          .setLngLat(coords)
           .setPopup(
             new maplibregl.Popup({ offset: 15, closeButton: false }).setHTML(`
               <div class="p-2.5 text-xs font-sans text-neutral-900 max-w-[240px]">
@@ -249,6 +284,9 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     // 2. Verified & Citizen Incident Reports
     if (layersVisible.citizenReports) {
       reports.forEach(report => {
+        const coords = getSafeLngLat(report);
+        if (!coords) return;
+
         const el = document.createElement('div');
         el.className = 'cursor-pointer';
         el.innerHTML = `
@@ -263,7 +301,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
         `;
 
         const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([report.longitude, report.latitude])
+          .setLngLat(coords)
           .setPopup(
             new maplibregl.Popup({ offset: 12 }).setHTML(`
               <div class="p-2.5 text-xs font-sans text-neutral-900 max-w-[230px]">
@@ -285,6 +323,9 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     // 3. Active Emergency Alerts
     if (layersVisible.emergencyAlerts) {
       alerts.filter(a => a.status === 'ACTIVE').forEach(alert => {
+        const coords = getSafeLngLat(alert);
+        if (!coords) return;
+
         const el = document.createElement('div');
         el.className = 'cursor-pointer animate-pulse';
         el.innerHTML = `
@@ -298,7 +339,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
         `;
 
         const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([alert.longitude, alert.latitude])
+          .setLngLat(coords)
           .setPopup(
             new maplibregl.Popup({ offset: 15 }).setHTML(`
               <div class="p-3 text-xs font-sans text-neutral-900 max-w-[260px]">
@@ -321,6 +362,9 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     // 4. Critical Highway Choke Points & Exposure
     if (layersVisible.criticalRoads) {
       roads.forEach(road => {
+        const coords = getSafeLngLat(road.startCoords);
+        if (!coords) return;
+
         const el = document.createElement('div');
         el.className = 'cursor-pointer';
         el.innerHTML = `
@@ -331,7 +375,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
         `;
 
         const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([road.startCoords[1], road.startCoords[0]])
+          .setLngLat(coords)
           .setPopup(
             new maplibregl.Popup({ offset: 12 }).setHTML(`
               <div class="p-2.5 text-xs font-sans text-neutral-900 max-w-[240px]">
@@ -357,6 +401,9 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
       selectedMarkerRef.current.remove();
     }
 
+    const coords = getSafeLngLat({ lon: clickedCoord.lon, lat: clickedCoord.lat });
+    if (!coords) return;
+
     const pinEl = document.createElement('div');
     pinEl.className = 'flex flex-col items-center animate-bounce';
     pinEl.innerHTML = `
@@ -365,7 +412,7 @@ export const IndiaMap: React.FC<IndiaMapProps> = ({
     `;
 
     selectedMarkerRef.current = new maplibregl.Marker({ element: pinEl, anchor: 'bottom' })
-      .setLngLat([clickedCoord.lon, clickedCoord.lat])
+      .setLngLat(coords)
       .addTo(mapRef.current);
   }, [clickedCoord]);
 
