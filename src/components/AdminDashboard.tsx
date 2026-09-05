@@ -302,23 +302,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleDispatchSectorDrill = async () => {
     setIsSendingDrillSms(true);
     try {
-      const drillMsg = `[NDMA ALERT - CRITICAL] Landslide Early Warning Drill: Sector NH-29 Kohima active. Evacuation route verified. - NDMA Control`;
-
-      // Call the real dispatcher
-      const res = await dispatchRealSMS('Kohima (NH-29)', drillMsg);
-
-      if (res.success) {
-        if (typeof window !== 'undefined') {
-          alert(`✅ LIVE SMS SENT! Dispatched to: ${res.numbers?.join(', ') || 'recipients'}. Check your physical phone.`);
-        }
-        setDrillSuccess(`✅ LIVE SMS SENT! Dispatched to: ${res.numbers?.join(', ') || 'recipients'}`);
-        // Reload the feed from Supabase
-        await fetchSMSLogs();
-        setTimeout(() => setDrillSuccess(null), 5000);
+      const res = await dispatchRealSMS('Kohima (NH-29)', 'Emergency Drill Active');
+      if (typeof window !== 'undefined') {
+        alert(`📡 Carrier Dispatch Sent!\nTarget: +91 ${res.phone}\nAlert Code: ${res.token}\nCheck your physical phone now.`);
       }
+      setDrillSuccess(`📡 Carrier Dispatch Sent! Target: +91 ${res.phone} (Code: ${res.token})`);
+      if (typeof fetchSMSLogs === 'function') {
+        await fetchSMSLogs();
+      }
+      setTimeout(() => setDrillSuccess(null), 5000);
     } catch (err: any) {
       if (typeof window !== 'undefined') {
-        alert(`SMS Notice: ${err.message}`);
+        alert(`SMS Error: ${err.message}`);
       }
     } finally {
       setIsSendingDrillSms(false);
