@@ -1,21 +1,24 @@
 /**
- * Supabase Client & Zero-Install Offline RBAC Service (SIH-26001 Aligned)
- * Provides authentication and database operations backed by Supabase if configured,
- * or seamless local storage and mock authentication with full Role-Based Access Control (RBAC).
+ * Supabase Client & Authentication Layer (SIH-26001 Aligned)
+ * Environment: Vite + React + TypeScript + Tailwind CSS
+ * Standard Supabase client interface backed by Supabase REST API with zero-install offline fallback.
  *
- * Supported Roles:
- * - 'admin': NDMA/DDMA Official (Full administrative privileges, CAP alert publishing, Verification Gate)
- * - 'user': Citizen / Field Officer (Hazard reporting, live map, personal submissions history)
+ * Target Credentials:
+ * - Supabase URL: https://jizqmqwxnynijwnmmklk.supabase.co
+ * - Supabase Anon Key: sb_publishable_6Njl6Lvmxyq2n7XTTN6Z5w_vi4B-iza
+ * - Admin Email: sankettiwari943@gmail.com (Role: 'admin')
+ * - Default User Role: 'citizen'
  */
 
-export type UserRole = 'admin' | 'user' | 'ADMIN' | 'USER';
+export type UserRole = 'admin' | 'citizen' | 'ADMIN' | 'USER';
 
 export interface SupabaseUser {
   id: string;
   email: string;
   full_name: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'citizen';
   organization?: string;
+  phone?: string;
   created_at: string;
 }
 
@@ -25,200 +28,392 @@ export interface SupabaseSession {
   expires_at: number;
 }
 
-const SUPABASE_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || '';
-const SUPABASE_ANON_KEY = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || '';
+export interface AuthResponse {
+  data: {
+    user: SupabaseUser | null;
+    session: SupabaseSession | null;
+  };
+  error: Error | null;
+}
 
-const LOCAL_STORAGE_SESSION_KEY = 'ner_supabase_auth_session';
+export interface AuthStateChangeCallback {
+  (event: 'SIGNED_IN' | 'SIGNED_OUT' | 'USER_UPDATED' | 'INITIAL_SESSION', session: SupabaseSession | null): void;
+}
 
-class SupabaseAuthService {
+const DEFAULT_SUPABASE_URL = 'https://jizqmqwxnynijwnmmklk.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_6Njl6Lvmxyq2n7XTTN6Z5w_vi4B-iza';
+
+export const ADMIN_EMAIL = 'sankettiwari943@gmail.com';
+
+const supabaseUrl =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || DEFAULT_SUPABASE_URL;
+const supabaseAnonKey =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || DEFAULT_SUPABASE_ANON_KEY;
+
+const SESSION_STORAGE_KEY = 'sb-jizqmqwxnynijwnmmklk-auth-token';
+
+class SupabaseAuthClient {
+  private url: string;
+  private anonKey: string;
   private currentSession: SupabaseSession | null = null;
-  private listeners: Array<(session: SupabaseSession | null) => void> = [];
+  private listeners: AuthStateChangeCallback[] = [];
 
-  constructor() {
-    this.loadPersistedSession();
+  constructor(url: string, anonKey: string) {
+    this.url = url.replace(/\/+$/, '');
+    this.anonKey = anonKey;
+    this.loadSession();
   }
 
-  private loadPersistedSession(): void {
+  private loadSession(): void {
     if (typeof window === 'undefined') return;
     try {
-      const stored = localStorage.getItem(LOCAL_STORAGE_SESSION_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Normalize role to lowercase 'admin' or 'user'
-        if (parsed?.user?.role) {
-          parsed.user.role = parsed.user.role.toLowerCase() === 'admin' ? 'admin' : 'user';
+      const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (raw) {
+        const parsed: SupabaseSession = JSON.parse(raw);
+        if (parsed?.user) {
+          // Normalize role
+          parsed.user.role = this.determineRole(parsed.user.email, parsed.user.role);
+          this.currentSession = parsed;
         }
-        this.currentSession = parsed;
       }
     } catch {
       this.currentSession = null;
     }
   }
 
-  private persistSession(session: SupabaseSession | null): void {
+  private saveSession(session: SupabaseSession | null): void {
     this.currentSession = session;
     if (typeof window === 'undefined') return;
     try {
       if (session) {
-        localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(session));
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
       } else {
-        localStorage.removeItem(LOCAL_STORAGE_SESSION_KEY);
+        localStorage.removeItem(SESSION_STORAGE_KEY);
       }
-    } catch (e) {
-      console.warn('Unable to persist session to localStorage', e);
+    } catch (err) {
+      console.warn('Failed to save Supabase session:', err);
     }
-    this.notifyListeners();
   }
 
-  private notifyListeners(): void {
-    this.listeners.forEach(cb => cb(this.currentSession));
-  }
-
-  public onAuthStateChange(callback: (session: SupabaseSession | null) => void): () => void {
-    this.listeners.push(callback);
-    callback(this.currentSession);
-    return () => {
-      this.listeners = this.listeners.filter(cb => cb !== callback);
-    };
-  }
-
-  public getSession(): SupabaseSession | null {
-    if (!this.currentSession) {
-      this.loadPersistedSession();
-    }
-    return this.currentSession;
-  }
-
-  public getUser(): SupabaseUser | null {
-    return this.getSession()?.user || null;
-  }
-
-  public isAdmin(): boolean {
-    const user = this.getUser();
-    if (!user) return false;
-    return user.role === 'admin' || (user.role as string).toUpperCase() === 'ADMIN';
-  }
-
-  /**
-   * Fast sign-in helper for demo roles
-   */
-  public async signInAsRole(role: 'admin' | 'user'): Promise<SupabaseSession> {
-    const isAdm = role === 'admin';
-    const user: SupabaseUser = {
-      id: isAdm ? 'usr_ddma_official_01' : 'usr_citizen_scout_01',
-      email: isAdm ? 'admin@ddma.nagaland.gov.in' : 'field.scout@ner-landslide.in',
-      full_name: isAdm ? 'Er. Alemba Ao (DDMA Kohima)' : 'Tsering Dorjee (Field Scout)',
-      role: isAdm ? 'admin' : 'user',
-      organization: isAdm ? 'Nagaland State Disaster Management Authority (NSDMA)' : 'NER Community Watch / Field Scout',
-      created_at: new Date().toISOString(),
-    };
-
-    const session: SupabaseSession = {
-      user,
-      access_token: `mock_jwt_ner_${role}_${Date.now()}`,
-      expires_at: Date.now() + 86400 * 1000 * 7, // 7 days
-    };
-
-    this.persistSession(session);
-    return session;
-  }
-
-  /**
-   * Sign in with Email / Password
-   */
-  public async signInWithPassword(email: string, pass: string): Promise<SupabaseSession> {
-    // If Supabase credentials exist, we could fetch from Supabase REST endpoint
-    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+  private notify(event: 'SIGNED_IN' | 'SIGNED_OUT' | 'USER_UPDATED' | 'INITIAL_SESSION'): void {
+    this.listeners.forEach(cb => {
       try {
-        const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        cb(event, this.currentSession);
+      } catch (e) {
+        console.error('Error in auth listener:', e);
+      }
+    });
+  }
+
+  public determineRole(email?: string, requestedRole?: string): 'admin' | 'citizen' {
+    if (!email) return 'citizen';
+    const em = email.toLowerCase().trim();
+    if (em === ADMIN_EMAIL.toLowerCase() || em.includes('admin') || em.includes('ddma') || em.includes('ndma')) {
+      return 'admin';
+    }
+    if (requestedRole && (requestedRole.toLowerCase() === 'admin' || requestedRole.toUpperCase() === 'ADMIN')) {
+      return 'admin';
+    }
+    return 'citizen';
+  }
+
+  public async getSession(): Promise<{ data: { session: SupabaseSession | null }; error: null }> {
+    if (!this.currentSession) {
+      this.loadSession();
+    }
+    return { data: { session: this.currentSession }, error: null };
+  }
+
+  public async getUser(): Promise<{ data: { user: SupabaseUser | null }; error: null }> {
+    const { data } = await this.getSession();
+    return { data: { user: data.session?.user || null }, error: null };
+  }
+
+  public onAuthStateChange(callback: AuthStateChangeCallback): { data: { subscription: { unsubscribe: () => void } } } {
+    this.listeners.push(callback);
+    // Initial emission
+    setTimeout(() => callback('INITIAL_SESSION', this.currentSession), 0);
+    return {
+      data: {
+        subscription: {
+          unsubscribe: () => {
+            this.listeners = this.listeners.filter(cb => cb !== callback);
+          }
+        }
+      }
+    };
+  }
+
+  /**
+   * Sign in with Email and Password
+   */
+  public async signInWithPassword(credentials: { email: string; password: string }): Promise<AuthResponse> {
+    const { email, password } = credentials;
+
+    // Try real Supabase endpoint
+    if (this.url && this.anonKey) {
+      try {
+        const res = await fetch(`${this.url}/auth/v1/token?grant_type=password`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'apikey': SUPABASE_ANON_KEY,
+            'apikey': this.anonKey,
           },
-          body: JSON.stringify({ email, password: pass }),
+          body: JSON.stringify({ email, password }),
         });
-        if (response.ok) {
-          const data = await response.json();
-          const role: 'admin' | 'user' = email.toLowerCase().includes('admin') || email.toLowerCase().includes('ddma') ? 'admin' : 'user';
-          const session: SupabaseSession = {
-            user: {
-              id: data.user?.id || 'usr_remote',
-              email: data.user?.email || email,
-              full_name: data.user?.user_metadata?.full_name || email.split('@')[0],
-              role,
-              organization: data.user?.user_metadata?.organization || 'Disaster Management Cell',
-              created_at: data.user?.created_at || new Date().toISOString(),
-            },
-            access_token: data.access_token || `token_${Date.now()}`,
-            expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+
+        if (res.ok) {
+          const json = await res.json();
+          const role = this.determineRole(email, json.user?.user_metadata?.role);
+          const user: SupabaseUser = {
+            id: json.user?.id || `usr_${Date.now()}`,
+            email: json.user?.email || email,
+            full_name: json.user?.user_metadata?.full_name || (email === ADMIN_EMAIL ? 'Sanket Tiwari (NDMA Authority)' : email.split('@')[0]),
+            role,
+            organization: json.user?.user_metadata?.organization || (role === 'admin' ? 'DDMA / NDMA Command' : 'Citizen Field Observer'),
+            created_at: json.user?.created_at || new Date().toISOString(),
           };
-          this.persistSession(session);
-          return session;
+
+          const session: SupabaseSession = {
+            user,
+            access_token: json.access_token || `token_${Date.now()}`,
+            expires_at: Date.now() + (json.expires_in || 3600) * 1000,
+          };
+
+          this.saveSession(session);
+          this.notify('SIGNED_IN');
+          return { data: { user, session }, error: null };
         }
-      } catch {
-        // Fallback to local mock below
+      } catch (fetchErr) {
+        console.warn('Remote Supabase connection unreachable, using offline fallback:', fetchErr);
       }
     }
 
-    // Local Mock Fallback
-    const isAdmin = email.toLowerCase().includes('admin') || email.toLowerCase().includes('ddma') || pass.toLowerCase().includes('admin');
+    // Local / Offline fallback authentication
+    const role = this.determineRole(email);
     const user: SupabaseUser = {
       id: `usr_${Date.now().toString(36)}`,
       email,
-      full_name: isAdmin ? 'DDMA Official' : email.split('@')[0],
-      role: isAdmin ? 'admin' : 'user',
-      organization: isAdmin ? 'State Disaster Management Authority' : 'Field Scout Network',
+      full_name: email === ADMIN_EMAIL ? 'Sanket Tiwari (NDMA Authority)' : role === 'admin' ? 'DDMA Official' : email.split('@')[0],
+      role,
+      organization: role === 'admin' ? 'DDMA Kohima / NSDMA' : 'NER Citizen Watch',
       created_at: new Date().toISOString(),
     };
 
     const session: SupabaseSession = {
       user,
-      access_token: `mock_jwt_${user.role}_${Date.now()}`,
-      expires_at: Date.now() + 86400000 * 7,
+      access_token: `sb_local_token_${role}_${Date.now()}`,
+      expires_at: Date.now() + 86400 * 1000 * 7,
     };
 
-    this.persistSession(session);
-    return session;
+    this.saveSession(session);
+    this.notify('SIGNED_IN');
+    return { data: { user, session }, error: null };
   }
 
   /**
-   * Register a new user
+   * Sign up a new user (Default Role: 'citizen')
    */
-  public async signUp(payload: { email: string; password?: string; full_name: string; role?: 'admin' | 'user' | 'ADMIN' | 'USER'; organization?: string }): Promise<SupabaseSession> {
-    const rawRole = (payload.role || 'user').toLowerCase();
-    const role: 'admin' | 'user' = rawRole === 'admin' ? 'admin' : 'user';
+  public async signUp(params: {
+    email: string;
+    password: string;
+    options?: {
+      data?: {
+        full_name?: string;
+        role?: string;
+        organization?: string;
+        phone?: string;
+      };
+    };
+  }): Promise<AuthResponse> {
+    const { email, password, options } = params;
+    const requestedRole = options?.data?.role || 'citizen';
+    const role = this.determineRole(email, requestedRole);
+    const fullName = options?.data?.full_name || (email === ADMIN_EMAIL ? 'Sanket Tiwari (NDMA Authority)' : email.split('@')[0]);
+
+    if (this.url && this.anonKey) {
+      try {
+        const res = await fetch(`${this.url}/auth/v1/signup`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': this.anonKey,
+          },
+          body: JSON.stringify({
+            email,
+            password,
+            data: {
+              full_name: fullName,
+              role,
+              organization: options?.data?.organization,
+              phone: options?.data?.phone,
+            },
+          }),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          const user: SupabaseUser = {
+            id: json.user?.id || `usr_${Date.now()}`,
+            email: json.user?.email || email,
+            full_name: fullName,
+            role,
+            organization: options?.data?.organization || (role === 'admin' ? 'NDMA Command' : 'Citizen Field Watch'),
+            created_at: json.user?.created_at || new Date().toISOString(),
+          };
+
+          const session: SupabaseSession = {
+            user,
+            access_token: json.access_token || `token_${Date.now()}`,
+            expires_at: Date.now() + (json.expires_in || 3600) * 1000,
+          };
+
+          this.saveSession(session);
+          this.notify('SIGNED_IN');
+          return { data: { user, session }, error: null };
+        }
+      } catch (err) {
+        console.warn('Remote signup error, using offline simulation:', err);
+      }
+    }
 
     const user: SupabaseUser = {
       id: `usr_${Date.now().toString(36)}`,
-      email: payload.email,
-      full_name: payload.full_name,
+      email,
+      full_name: fullName,
       role,
-      organization: payload.organization || 'Field Observer',
+      organization: options?.data?.organization || (role === 'admin' ? 'NDMA Command' : 'Citizen Field Watch'),
       created_at: new Date().toISOString(),
     };
 
     const session: SupabaseSession = {
       user,
-      access_token: `mock_jwt_${role}_${Date.now()}`,
-      expires_at: Date.now() + 86400000 * 7,
+      access_token: `sb_local_token_${role}_${Date.now()}`,
+      expires_at: Date.now() + 86400 * 1000 * 7,
     };
 
-    this.persistSession(session);
-    return session;
+    this.saveSession(session);
+    this.notify('SIGNED_IN');
+    return { data: { user, session }, error: null };
+  }
+
+  /**
+   * Fast 1-Click Role Login for demo evaluation
+   */
+  public async signInAsDemoRole(targetRole: 'admin' | 'citizen'): Promise<AuthResponse> {
+    const isAdm = targetRole === 'admin';
+    const email = isAdm ? ADMIN_EMAIL : 'field.scout@ner-landslide.in';
+    const user: SupabaseUser = {
+      id: isAdm ? 'usr_admin_sanket' : 'usr_citizen_scout',
+      email,
+      full_name: isAdm ? 'Sanket Tiwari (NDMA Authority)' : 'Tsering Dorjee (Field Scout)',
+      role: isAdm ? 'admin' : 'citizen',
+      organization: isAdm ? 'National Disaster Management Authority (NDMA)' : 'Citizen Scout Network',
+      created_at: new Date().toISOString(),
+    };
+
+    const session: SupabaseSession = {
+      user,
+      access_token: `sb_demo_${targetRole}_${Date.now()}`,
+      expires_at: Date.now() + 86400 * 1000 * 7,
+    };
+
+    this.saveSession(session);
+    this.notify('SIGNED_IN');
+    return { data: { user, session }, error: null };
   }
 
   /**
    * Sign out
    */
-  public async signOut(): Promise<void> {
-    this.persistSession(null);
+  public async signOut(): Promise<{ error: null }> {
+    if (this.url && this.anonKey && this.currentSession?.access_token) {
+      try {
+        await fetch(`${this.url}/auth/v1/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': this.anonKey,
+            'Authorization': `Bearer ${this.currentSession.access_token}`,
+          },
+        });
+      } catch {
+        // Fall through to local cleanup
+      }
+    }
+    this.saveSession(null);
+    this.notify('SIGNED_OUT');
+    return { error: null };
   }
 }
 
-export const supabaseAuth = new SupabaseAuthService();
+export class SupabaseClient {
+  public auth: SupabaseAuthClient;
+  public url: string;
+  public anonKey: string;
 
-export const supabase = {
-  auth: supabaseAuth,
-  isConfigured: Boolean(SUPABASE_URL && SUPABASE_ANON_KEY),
-};
+  constructor(url: string, anonKey: string) {
+    this.url = url;
+    this.anonKey = anonKey;
+    this.auth = new SupabaseAuthClient(url, anonKey);
+  }
+
+  public from(tableName: string) {
+    const baseUrl = `${this.url.replace(/\/+$/, '')}/rest/v1/${tableName}`;
+    const key = this.anonKey;
+
+    return {
+      select: (columns: string = '*') => ({
+        eq: async (column: string, value: any) => {
+          try {
+            const res = await fetch(`${baseUrl}?select=${columns}&${column}=eq.${encodeURIComponent(value)}`, {
+              headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              return { data, error: null };
+            }
+          } catch {}
+          return { data: [], error: null };
+        },
+        order: async () => {
+          try {
+            const res = await fetch(`${baseUrl}?select=${columns}`, {
+              headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              return { data, error: null };
+            }
+          } catch {}
+          return { data: [], error: null };
+        }
+      }),
+      insert: async (records: any | any[]) => {
+        try {
+          const res = await fetch(baseUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': key,
+              'Authorization': `Bearer ${key}`,
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(records)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            return { data, error: null };
+          }
+        } catch {}
+        return { data: records, error: null };
+      }
+    };
+  }
+}
+
+export function createClient(url: string, anonKey: string): SupabaseClient {
+  return new SupabaseClient(url, anonKey);
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);

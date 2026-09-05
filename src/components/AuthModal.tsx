@@ -1,13 +1,14 @@
 /**
  * Supabase Role-Based Authentication Modal (SIH-26001 Aligned)
  * Supports sign in, registration, and quick-auth demo buttons:
- * - Login as DDMA Authority (Admin)
- * - Login as Citizen / Field Scout
+ * - Login as DDMA Authority (Admin: sankettiwari943@gmail.com)
+ * - Login as Citizen / Field Scout (Default Role: 'citizen')
  */
 
 import React, { useState } from 'react';
-import { X, Lock, Mail, User as UserIcon, Shield, Building, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { X, Lock, Mail, User as UserIcon, Shield, Building, AlertCircle, Loader2, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { ADMIN_EMAIL } from '../lib/supabase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -22,7 +23,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [organization, setOrganization] = useState('DDMA Nagaland / Citizen Watch');
-  const [role, setRole] = useState<'user' | 'admin'>('user');
+  const [role, setRole] = useState<'citizen' | 'admin'>('citizen');
   const [adminCode, setAdminCode] = useState('');
 
   const [loading, setLoading] = useState(false);
@@ -56,7 +57,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  const handleFastLogin = async (selectedRole: 'admin' | 'user') => {
+  const handleFastLogin = async (selectedRole: 'admin' | 'citizen') => {
     setError(null);
     setLoading(true);
     try {
@@ -86,10 +87,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </div>
           <div>
             <h2 className="text-lg font-bold text-slate-900">
-              {mode === 'signin' ? 'Sign In to NER Platform' : 'Register Field Observer'}
+              {mode === 'signin' ? 'Sign In to Supabase Auth' : 'Register Field Account'}
             </h2>
             <p className="text-xs text-slate-500">
-              Supabase RBAC &bull; Disaster Authorities &amp; Field Scouts
+              Disaster Authorities (Admin) &amp; Citizen Observers
             </p>
           </div>
         </div>
@@ -97,8 +98,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         {/* Demo Fast Login Buttons (SIH Requirement) */}
         <div className="my-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
           <div className="text-[11px] font-mono text-slate-500 uppercase font-bold flex items-center justify-between">
-            <span>DEMO ROLE AUTO-FILL</span>
-            <span className="text-[10px] text-indigo-600 font-semibold">1-Click Sign In</span>
+            <span>1-CLICK DEMO AUTHENTICATION</span>
+            <span className="text-[10px] text-indigo-600 font-semibold flex items-center gap-0.5">
+              <Sparkles className="w-3 h-3 text-indigo-500" />
+              <span>Instant</span>
+            </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
@@ -106,20 +110,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               id="btn-fast-auth-admin"
               onClick={() => handleFastLogin('admin')}
               disabled={loading}
-              className="py-2.5 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200 transition shadow-2xs cursor-pointer flex items-center justify-center gap-1.5"
+              className="py-2.5 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200 transition shadow-2xs cursor-pointer flex flex-col items-center justify-center gap-0.5"
             >
-              <Shield className="w-3.5 h-3.5 text-rose-600" />
-              <span>Login as DDMA Authority (Admin)</span>
+              <div className="flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-rose-600" />
+                <span>NDMA Admin</span>
+              </div>
+              <span className="text-[10px] text-rose-500 font-mono font-normal">sankettiwari943@gmail.com</span>
             </button>
             <button
               type="button"
               id="btn-fast-auth-user"
-              onClick={() => handleFastLogin('user')}
+              onClick={() => handleFastLogin('citizen')}
               disabled={loading}
-              className="py-2.5 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold border border-indigo-200 transition shadow-2xs cursor-pointer flex items-center justify-center gap-1.5"
+              className="py-2.5 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold border border-indigo-200 transition shadow-2xs cursor-pointer flex flex-col items-center justify-center gap-0.5"
             >
-              <UserIcon className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Login as Citizen / Field Scout</span>
+              <div className="flex items-center gap-1.5">
+                <UserIcon className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Citizen / Scout</span>
+              </div>
+              <span className="text-[10px] text-indigo-500 font-mono font-normal">Role: 'citizen'</span>
             </button>
           </div>
         </div>
@@ -143,7 +153,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     type="text"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Er. Alemba Ao"
+                    placeholder="Sanket Tiwari"
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500"
                     required
                   />
@@ -159,7 +169,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     type="text"
                     value={organization}
                     onChange={(e) => setOrganization(e.target.value)}
-                    placeholder="e.g. NSDMA / DDMA Kohima / Field Watch"
+                    placeholder="e.g. NDMA / NSDMA / Field Watch"
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
@@ -174,7 +184,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     onChange={(e) => setRole(e.target.value as any)}
                     className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500 font-medium"
                   >
-                    <option value="user">Citizen / Field Scout</option>
+                    <option value="citizen">Citizen / Field Scout</option>
                     <option value="admin">DDMA Authority (Admin)</option>
                   </select>
                 </div>
@@ -206,7 +216,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="officer@ddma.nagaland.gov.in"
+                placeholder={mode === 'signin' ? ADMIN_EMAIL : 'scout@field.in'}
                 className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500"
                 required
               />
@@ -238,7 +248,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             {loading ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Authenticating...</span>
+                <span>Connecting to Supabase...</span>
               </>
             ) : (
               <span>{mode === 'signin' ? 'Sign In' : 'Create Supabase Account'}</span>
@@ -255,7 +265,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 onClick={() => setMode('signup')}
                 className="text-indigo-600 hover:text-indigo-800 hover:underline font-semibold cursor-pointer"
               >
-                Register as Field Scout
+                Register as Citizen
               </button>
             </p>
           ) : (

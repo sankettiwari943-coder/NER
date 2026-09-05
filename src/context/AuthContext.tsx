@@ -1,14 +1,16 @@
 /**
  * Supabase Role-Based Authentication Context & Provider (SIH-26001 Aligned)
- * Backed by Supabase with persistent localStorage session and full offline mock fallback.
- * Roles:
- * - 'admin' (NDMA/DDMA Official): Full command, CAP alert broadcasting, Human Verification Gate
- * - 'user' (Citizen / Field Officer): Hazard reporting, personal submissions history, alert monitoring
+ * Connects directly to Supabase client with local session management and 1-click demo roles.
+ *
+ * Target Credentials:
+ * - Supabase URL: https://jizqmqwxnynijwnmmklk.supabase.co
+ * - Admin: sankettiwari943@gmail.com (Role: 'admin')
+ * - Default Role: 'citizen'
  */
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
-import { supabaseAuth, SupabaseUser, UserRole } from '../lib/supabase';
+import { supabase, SupabaseUser, ADMIN_EMAIL } from '../lib/supabase';
 import { api } from '../services/api';
 
 interface AuthContextType {
@@ -19,47 +21,55 @@ interface AuthContextType {
   login: (email: string, pass: string) => Promise<void>;
   signup: (payload: any) => Promise<void>;
   logout: () => Promise<void>;
-  fastLogin: (role: 'admin' | 'user' | 'ADMIN' | 'USER') => Promise<void>;
+  fastLogin: (role: 'admin' | 'citizen' | 'user' | 'ADMIN' | 'USER') => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function mapSupabaseUserToUser(sbUser: SupabaseUser | null): User | null {
   if (!sbUser) return null;
-  const rawRole = sbUser.role || 'user';
-  const isAdm = rawRole.toLowerCase() === 'admin';
+  const isAdm = sbUser.role === 'admin' || sbUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
   return {
     id: sbUser.id,
     email: sbUser.email,
-    full_name: sbUser.full_name,
+    full_name: sbUser.full_name || (isAdm ? 'Sanket Tiwari (NDMA Authority)' : 'Citizen Field Scout'),
     role: isAdm ? 'ADMIN' : 'USER',
-    organization: sbUser.organization || (isAdm ? 'DDMA / NDMA' : 'Citizen Field Network'),
+    organization: sbUser.organization || (isAdm ? 'National Disaster Management Authority (NDMA)' : 'Citizen Field Network'),
+    phone: sbUser.phone,
     created_at: sbUser.created_at,
   };
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(() => {
-    const session = supabaseAuth.getSession();
-    return mapSupabaseUserToUser(session?.user || null);
-  });
-  const [loading, setLoading] = useState<boolean>(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Listen to Supabase / Auth changes
-    const unsubscribe = supabaseAuth.onAuthStateChange((session) => {
-      const mapped = mapSupabaseUserToUser(session?.user || null);
-      setUser(mapped);
+    // 1. Initial Session Check
+    supabase.auth.getSession().then(({ data }) => {
+      const u = mapSupabaseUserToUser(data.session?.user || null);
+      setUser(u);
+      if (data.session?.access_token) {
+        api.setToken(data.session.access_token);
+      }
+      setLoading(false);
+    });
+
+    // 2. Auth State Change Listener
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      const u = mapSupabaseUserToUser(session?.user || null);
+      setUser(u);
       if (session?.access_token) {
         api.setToken(session.access_token);
       } else {
         api.setToken(null);
       }
+      setLoading(false);
     });
 
     return () => {
-      unsubscribe();
+      authListener.subscription.unsubscribe();
     };
   }, []);
 
@@ -67,10 +77,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     setLoading(true);
     try {
-      const session = await supabaseAuth.signInWithPassword(email, pass);
-      const mapped = mapSupabaseUserToUser(session.user);
+      const res = await supabase.auth.signInWithPassword({ email, password: pass });
+      if (res.error) {
+        throw res.error;
+      }
+      const mapped = mapSupabaseUserToUser(res.data.user);
       setUser(mapped);
-      api.setToken(session.access_token);
+      if (res.data.session?.access_token) {
+        api.setToken(res.data.session.access_token);
+      }
     } catch (err: any) {
       setError(err.message || 'Login failed');
       throw err;
@@ -83,10 +98,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     setLoading(true);
     try {
-      const session = await supabaseAuth.signUp(payload);
-      const mapped = mapSupabaseUserToUser(session.user);
+      const res = await supabase.auth.signUp({
+        email: payload.email,
+        password: payload.password,
+        options: {
+          data: {
+            full_name: payload.full_name,
+            role: payload.role || 'citizen',
+            organization: payload.organization,
+            phone: payload.phone,
+          },
+        },
+      });
+      if (res.error) {
+        throw res.error;
+      }
+      const mapped = mapSupabaseUserToUser(res.data.user);
       setUser(mapped);
-      api.setToken(session.access_token);
+      if (res.data.session?.access_token) {
+        api.setToken(res.data.session.access_token);
+      }
     } catch (err: any) {
       setError(err.message || 'Registration failed');
       throw err;
@@ -97,7 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      await supabaseAuth.signOut();
+      await supabase.auth.signOut();
       api.setToken(null);
       setUser(null);
     } catch (err) {
@@ -107,15 +138,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const fastLogin = async (role: 'admin' | 'user' | 'ADMIN' | 'USER') => {
+  const fastLogin = async (role: 'admin' | 'citizen' | 'user' | 'ADMIN' | 'USER') => {
     setError(null);
     setLoading(true);
     try {
-      const normalizedRole = role.toLowerCase() === 'admin' ? 'admin' : 'user';
-      const session = await supabaseAuth.signInAsRole(normalizedRole);
-      const mapped = mapSupabaseUserToUser(session.user);
+      const targetRole: 'admin' | 'citizen' =
+        role.toLowerCase() === 'admin' ? 'admin' : 'citizen';
+      const res = await supabase.auth.signInAsDemoRole(targetRole);
+      const mapped = mapSupabaseUserToUser(res.data.user);
       setUser(mapped);
-      api.setToken(session.access_token);
+      if (res.data.session?.access_token) {
+        api.setToken(res.data.session.access_token);
+      }
     } catch (err: any) {
       setError(err.message || 'Fast login failed');
       throw err;
@@ -124,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const isAdmin = user?.role === 'ADMIN' || (user as any)?.role === 'admin';
+  const isAdmin = user?.role === 'ADMIN' || user?.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
   return (
     <AuthContext.Provider

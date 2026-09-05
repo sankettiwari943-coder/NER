@@ -179,17 +179,17 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-slate-400">Demo Access:</span>
               <button
                 id="btn-quick-analyst"
-                onClick={() => fastLogin('user')}
+                onClick={() => fastLogin('citizen')}
                 className="px-2.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition font-medium cursor-pointer"
               >
-                Field Scout
+                Citizen Scout
               </button>
               <button
                 id="btn-quick-admin"
                 onClick={() => fastLogin('admin')}
                 className="px-2.5 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/60 transition font-bold cursor-pointer"
               >
-                DDMA Admin
+                NDMA Admin
               </button>
             </div>
           ) : (
