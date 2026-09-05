@@ -184,6 +184,36 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
       }
 
       // Online submission to Supabase & Live Ingestion Core
+      const reportPayload = {
+        user_id: currentUser ? currentUser.id : null,
+        reporter_name: currentUser?.full_name || 'Field Observer',
+        reporter_email: currentUser?.email || 'citizen@ner.gov.in',
+        title: `${hazardType} at ${locationName.trim() || 'Field Sector'}`,
+        issue_type: hazardType,
+        hazard_type: hazardType,
+        severity: severity || 'HIGH',
+        location_name: locationName.trim() || 'Kohima - NH-29 Ghat',
+        latitude: lat,
+        longitude: lon,
+        corridor_chainage: 'NH-29 Corridor',
+        description: description.trim(),
+        status: 'PENDING',
+        verification_status: 'UNVERIFIED',
+        created_at: new Date().toISOString()
+      };
+
+      try {
+        const { error: sbError } = await supabase
+          .from('reports')
+          .insert([reportPayload])
+          .select();
+        if (sbError) {
+          console.warn('Direct Supabase insert notification:', sbError.message);
+        }
+      } catch (insertErr) {
+        console.warn('Supabase insert exception:', insertErr);
+      }
+
       const formData = new FormData();
       formData.append('hazard_type', hazardType);
       formData.append('severity', severity);
@@ -193,6 +223,7 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
       formData.append('description', description.trim());
       formData.append('user_id', currentUser?.id || 'usr_local');
       formData.append('reporter_name', currentUser?.full_name || 'Field Observer');
+      formData.append('reporter_email', currentUser?.email || 'citizen@ner.gov.in');
 
       if (selectedFile) {
         formData.append('photo', selectedFile);
@@ -204,7 +235,7 @@ export const CitizenReportModal: React.FC<CitizenReportModalProps> = ({
       setTimeout(() => {
         onReportSubmitted();
         onClose();
-      }, 1200);
+      }, 1000);
     } catch (err: any) {
       setValidationError(err.message || 'Failed to submit report.');
     } finally {

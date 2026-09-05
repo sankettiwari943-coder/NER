@@ -186,9 +186,11 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                           : rep.verification_status === 'UNDER REVIEW'
                           ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                          : rep.verification_status === 'REJECTED'
+                          ? 'bg-slate-100 text-slate-600 border border-slate-200'
                           : 'bg-amber-50 text-amber-700 border border-amber-200'
                       }`}>
-                        {rep.verification_status}
+                        {rep.verification_status === 'UNVERIFIED' ? 'PENDING' : rep.verification_status}
                       </span>
                     </div>
                     <div className="text-slate-500 text-[11px] truncate font-medium">{rep.location_name}</div>

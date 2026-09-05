@@ -182,7 +182,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const filteredReports = statusFilter === 'ALL'
     ? reports
-    : reports.filter(r => r.verification_status === statusFilter);
+    : reports.filter(r => {
+        if (statusFilter === 'UNVERIFIED') {
+          return r.verification_status === 'UNVERIFIED' || r.verification_status === 'PENDING' || !r.verification_status;
+        }
+        return r.verification_status === statusFilter;
+      });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
