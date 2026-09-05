@@ -16,7 +16,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { login, signup, fastLogin } = useAuth();
+  const { login, signup } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
 
   const [email, setEmail] = useState('');
@@ -57,19 +57,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  const handleFastLogin = async (selectedRole: 'admin' | 'citizen') => {
-    setError(null);
-    setLoading(true);
-    try {
-      await fastLogin(selectedRole);
-      onClose();
-    } catch (err: any) {
-      setError(err.message || 'Fast login failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 text-slate-800 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
@@ -81,7 +68,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <X className="w-5 h-5" />
         </button>
 
-        <div className="flex items-center gap-3 mb-2">
+        <div className="flex items-center gap-3 mb-4">
           <div className="p-2.5 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 shadow-2xs">
             <Lock className="w-5 h-5" />
           </div>
@@ -90,47 +77,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               {mode === 'signin' ? 'Sign In to Supabase Auth' : 'Register Field Account'}
             </h2>
             <p className="text-xs text-slate-500">
-              Disaster Authorities (Admin) &amp; Citizen Observers
+              Disaster Authorities (Admin: {ADMIN_EMAIL}) &amp; Citizen Observers
             </p>
-          </div>
-        </div>
-
-        {/* Demo Fast Login Buttons (SIH Requirement) */}
-        <div className="my-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-          <div className="text-[11px] font-mono text-slate-500 uppercase font-bold flex items-center justify-between">
-            <span>1-CLICK DEMO AUTHENTICATION</span>
-            <span className="text-[10px] text-indigo-600 font-semibold flex items-center gap-0.5">
-              <Sparkles className="w-3 h-3 text-indigo-500" />
-              <span>Instant</span>
-            </span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <button
-              type="button"
-              id="btn-fast-auth-admin"
-              onClick={() => handleFastLogin('admin')}
-              disabled={loading}
-              className="py-2.5 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200 transition shadow-2xs cursor-pointer flex flex-col items-center justify-center gap-0.5"
-            >
-              <div className="flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-rose-600" />
-                <span>NDMA Admin</span>
-              </div>
-              <span className="text-[10px] text-rose-500 font-mono font-normal">sankettiwari943@gmail.com</span>
-            </button>
-            <button
-              type="button"
-              id="btn-fast-auth-user"
-              onClick={() => handleFastLogin('citizen')}
-              disabled={loading}
-              className="py-2.5 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold border border-indigo-200 transition shadow-2xs cursor-pointer flex flex-col items-center justify-center gap-0.5"
-            >
-              <div className="flex items-center gap-1.5">
-                <UserIcon className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Citizen / Scout</span>
-              </div>
-              <span className="text-[10px] text-indigo-500 font-mono font-normal">Role: 'citizen'</span>
-            </button>
           </div>
         </div>
 

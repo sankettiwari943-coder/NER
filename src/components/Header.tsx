@@ -50,7 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuthModal,
   dataFreshness,
 }) => {
-  const { user, logout, fastLogin, isAdmin } = useAuth();
+  const { user, logout, isAdmin } = useAuth();
   const {
     isOnline,
     queuedCount,
@@ -176,44 +176,9 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Demo Access Session Switcher */}
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className="text-slate-400 hidden sm:inline">Demo Access:</span>
-            <button
-              id="btn-quick-analyst"
-              onClick={async () => {
-                await fastLogin('citizen');
-                onSelectTab('map');
-              }}
-              className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
-                user && user.email !== ADMIN_EMAIL
-                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-              }`}
-              title="Authenticate as Field Officer (Citizen Scout) - scout@ner.gov.in"
-            >
-              Citizen Scout
-            </button>
-            <button
-              id="btn-quick-admin"
-              onClick={async () => {
-                await fastLogin('admin');
-                onSelectTab('admin');
-              }}
-              className={`px-2.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer ${
-                user && (user.email === ADMIN_EMAIL || user.email === 'sankettiwari943@gmail.com')
-                  ? 'bg-rose-600 text-white shadow-xs'
-                  : 'bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/60'
-              }`}
-              title="Authenticate as NDMA Admin - sankettiwari943@gmail.com"
-            >
-              NDMA Admin
-            </button>
-          </div>
-
-          {user && (
-            <div className="flex items-center gap-1.5 pl-2 border-l border-slate-700 text-[11px]">
-              <span className="text-slate-400 hidden md:inline">User:</span>
+          {user ? (
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-slate-400 hidden sm:inline">User:</span>
               <span className="font-semibold text-slate-200 truncate max-w-[140px] sm:max-w-[180px]" title={user.full_name}>
                 {user.full_name}
               </span>
@@ -224,6 +189,11 @@ export const Header: React.FC<HeaderProps> = ({
               }`}>
                 {(user.email === ADMIN_EMAIL || user.email === 'sankettiwari943@gmail.com') ? 'ADMIN' : 'USER'}
               </span>
+            </div>
+          ) : (
+            <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <span>Mode:</span>
+              <span className="text-slate-300 font-medium">Public Citizen View</span>
             </div>
           )}
         </div>

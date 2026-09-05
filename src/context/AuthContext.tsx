@@ -13,13 +13,13 @@ import { api } from '../services/api';
 
 interface AuthContextType {
   user: User | null;
+  role: string | null;
   loading: boolean;
   error: string | null;
   isAdmin: boolean;
   login: (email: string, pass: string) => Promise<void>;
   signup: (payload: any) => Promise<void>;
   logout: () => Promise<void>;
-  fastLogin: (role: 'admin' | 'citizen' | 'user' | 'ADMIN' | 'USER') => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,14 +41,22 @@ function mapSupabaseUserToUser(sbUser: SupabaseUser | null): User | null {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Default state on first load must be strictly null / unauthenticated
   const [user, setUser] = useState<User | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  const applyUserState = (u: User | null) => {
+    setUser(u);
+    setRole(u?.role || null);
+    setIsAdmin(Boolean(u && u.email && u.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim() && u.role === 'ADMIN'));
+  };
 
   useEffect(() => {
     // 1. Check existing persisted session
     supabase.auth.getSession().then(({ data }) => {
       const u = mapSupabaseUserToUser(data.session?.user || null);
-      setUser(u);
+      applyUserState(u);
       if (data.session?.access_token) {
         api.setToken(data.session.access_token);
       } else {
@@ -60,7 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 2. Auth State Change Listener
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       const u = mapSupabaseUserToUser(session?.user || null);
-      setUser(u);
+      applyUserState(u);
       if (session?.access_token) {
         api.setToken(session.access_token);
       } else {
@@ -83,7 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw res.error;
       }
       const mapped = mapSupabaseUserToUser(res.data.user);
-      setUser(mapped);
+      applyUserState(mapped);
       if (res.data.session?.access_token) {
         api.setToken(res.data.session.access_token);
       }
@@ -115,7 +123,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw res.error;
       }
       const mapped = mapSupabaseUserToUser(res.data.user);
-      setUser(mapped);
+      applyUserState(mapped);
       if (res.data.session?.access_token) {
         api.setToken(res.data.session.access_token);
       }
@@ -131,53 +139,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await supabase.auth.signOut();
       api.setToken(null);
-      setUser(null);
+      applyUserState(null);
     } catch (err) {
       console.warn('Logout error:', err);
-      setUser(null);
+      applyUserState(null);
       api.setToken(null);
     }
   };
-
-  const fastLogin = async (role: 'admin' | 'citizen' | 'user' | 'ADMIN' | 'USER') => {
-    setError(null);
-    setLoading(true);
-    try {
-      const targetRole: 'admin' | 'citizen' =
-        role.toLowerCase() === 'admin' ? 'admin' : 'citizen';
-      const res = await supabase.auth.signInAsDemoRole(targetRole);
-      const mapped = mapSupabaseUserToUser(res.data.user);
-      setUser(mapped);
-      if (res.data.session?.access_token) {
-        api.setToken(res.data.session.access_token);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Fast login failed');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Strictly evaluated: Only sankettiwari943@gmail.com is Admin
-  const isAdmin = Boolean(
-    user &&
-    user.email &&
-    user.email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim() &&
-    user.role === 'ADMIN'
-  );
 
   return (
     <AuthContext.Provider
       value={{
         user,
+        role,
         loading,
         error,
         isAdmin,
         login,
         signup,
         logout,
-        fastLogin,
       }}
     >
       {children}
