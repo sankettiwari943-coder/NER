@@ -162,6 +162,7 @@ export interface CitizenReport {
   photo?: string;
   photo_storage_key?: string;
   verification_status: 'UNVERIFIED' | 'UNDER REVIEW' | 'VERIFIED' | 'REJECTED' | 'RESOLVED';
+  ai_status?: string;
   ai_observation?: string;
   admin_notes?: string;
   created_at: string;
