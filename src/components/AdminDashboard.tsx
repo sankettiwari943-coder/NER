@@ -92,35 +92,60 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const loadSmsLogs = async () => {
+  const fetchSMSLogs = async () => {
     setSmsLogsLoading(true);
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('sms_logs')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('dispatched_at', { ascending: false });
 
-      if (data && data.length > 0) {
+      if (!error && data && data.length > 0) {
         setSmsLogs(
           data.map((d: any) => ({
             id: d.id || `sms_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             recipient_phone: d.recipient_phone || '',
-            recipient_name: d.recipient_name || 'Registered Resident',
-            recipient_sector: d.recipient_sector || d.alert_title?.replace('Sector Hazard: ', '') || 'Kohima (NH-29)',
+            recipient_name: d.recipient_name || 'Subscribed Citizen',
+            recipient_sector: d.recipient_sector || d.alert_title?.replace('Sector Alert: ', '').replace('Sector Hazard: ', '') || 'Kohima (NH-29)',
             message: d.message_body || d.message || '[NDMA ALERT] Landslide Hazard Warning.',
             message_body: d.message_body || d.message,
             alert_title: d.alert_title || 'Sector Hazard Alert',
             severity: d.severity || 'CRITICAL',
             trigger_type: d.trigger_type || 'CAP_BROADCAST',
-            delivery_status: d.delivery_status || 'DELIVERED_CARRIER',
-            gateway_response: d.gateway_response || 'Fast2SMS Cellular Gateway (route=q)',
+            delivery_status: d.delivery_status || 'DELIVERED',
+            gateway_response: d.gateway_response || 'Fast2SMS Live Cellular Gateway',
             dispatched_at: d.dispatched_at || d.created_at || new Date().toISOString(),
             created_at: d.created_at || d.dispatched_at || new Date().toISOString()
           }))
         );
       } else {
-        const res = await api.getSmsLogs();
-        setSmsLogs(res.logs);
+        const { data: fallbackData } = await supabase
+          .from('sms_logs')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (fallbackData && fallbackData.length > 0) {
+          setSmsLogs(
+            fallbackData.map((d: any) => ({
+              id: d.id || `sms_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              recipient_phone: d.recipient_phone || '',
+              recipient_name: d.recipient_name || 'Subscribed Citizen',
+              recipient_sector: d.recipient_sector || d.alert_title?.replace('Sector Alert: ', '').replace('Sector Hazard: ', '') || 'Kohima (NH-29)',
+              message: d.message_body || d.message || '[NDMA ALERT] Landslide Hazard Warning.',
+              message_body: d.message_body || d.message,
+              alert_title: d.alert_title || 'Sector Hazard Alert',
+              severity: d.severity || 'CRITICAL',
+              trigger_type: d.trigger_type || 'CAP_BROADCAST',
+              delivery_status: d.delivery_status || 'DELIVERED',
+              gateway_response: d.gateway_response || 'Fast2SMS Live Cellular Gateway',
+              dispatched_at: d.dispatched_at || d.created_at || new Date().toISOString(),
+              created_at: d.created_at || d.dispatched_at || new Date().toISOString()
+            }))
+          );
+        } else {
+          const res = await api.getSmsLogs();
+          setSmsLogs(res.logs);
+        }
       }
     } catch (err) {
       console.error('Failed to load SMS logs:', err);
@@ -128,6 +153,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSmsLogsLoading(false);
     }
   };
+
+  const loadSmsLogs = fetchSMSLogs;
 
   useEffect(() => {
     async function loadAdminData() {
@@ -272,26 +299,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleAdminSendDrillSms = async () => {
+  const handleDispatchSectorDrill = async () => {
     setIsSendingDrillSms(true);
     try {
-      const res = await dispatchRealSMS(
-        'Kohima (NH-29)',
-        '[NDMA EMERGENCY ALERT] Severe landslide detected. Evacuation route active via NH-29.'
-      );
+      const drillMsg = `[NDMA ALERT - CRITICAL] Landslide Early Warning Drill: Sector NH-29 Kohima active. Evacuation route verified. - NDMA Control`;
+
+      // Call the real dispatcher
+      const res = await dispatchRealSMS('Kohima (NH-29)', drillMsg);
+
       if (res.success) {
-        setDrillSuccess(`Emergency broadcast drill dispatched to ${res.count} recipient(s) [${res.numbers}].`);
-      } else {
-        setDrillSuccess(res.reason || res.error || 'No active subscribers found.');
+        if (typeof window !== 'undefined') {
+          alert(`✅ LIVE SMS SENT! Dispatched to: ${res.numbers?.join(', ') || 'recipients'}. Check your physical phone.`);
+        }
+        setDrillSuccess(`✅ LIVE SMS SENT! Dispatched to: ${res.numbers?.join(', ') || 'recipients'}`);
+        // Reload the feed from Supabase
+        await fetchSMSLogs();
+        setTimeout(() => setDrillSuccess(null), 5000);
       }
-      await loadSmsLogs();
-      setTimeout(() => setDrillSuccess(null), 5000);
-    } catch (err) {
-      console.error('Failed to dispatch drill SMS:', err);
+    } catch (err: any) {
+      if (typeof window !== 'undefined') {
+        alert(`SMS Failed: ${err.message}`);
+      }
     } finally {
       setIsSendingDrillSms(false);
     }
   };
+
+  const handleAdminSendDrillSms = handleDispatchSectorDrill;
 
   const handleResolveAlert = async (alertId: string) => {
     try {
@@ -967,7 +1001,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="bg-rose-50/60 border border-rose-200/80 rounded-xl p-4 text-center">
               <div className="text-[10px] font-bold text-rose-700 uppercase tracking-wider">CAP Broadcasts</div>
               <div className="text-2xl font-bold font-mono text-rose-900 mt-0.5">
-                {smsLogs.filter((l) => l.trigger_type === 'CAP_BROADCAST' || l.trigger_type === 'GATE_APPROVED').length}
+                {smsLogs.length}
               </div>
               <div className="text-[10px] text-rose-600 mt-0.5">High-priority alerts</div>
             </div>
