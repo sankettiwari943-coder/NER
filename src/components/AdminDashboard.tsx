@@ -138,15 +138,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleTriggerAiObserve = async (reportId: string) => {
+  const [aiInspecting, setAiInspecting] = useState(false);
+
+  const handleTriggerAiObserve = async (report: CitizenReport) => {
+    setAiInspecting(true);
     try {
-      const res = await api.triggerAiObserve(reportId);
-      if (selectedReport && selectedReport.id === reportId) {
+      const res = await api.triggerAiObserve(
+        report.id,
+        report.photo_url || report.image_url,
+        report.hazard_type,
+        report.description
+      );
+      if (selectedReport && selectedReport.id === report.id) {
         setSelectedReport({ ...selectedReport, ai_observation: res.observation });
       }
       onRefreshData();
     } catch (err) {
       console.error('Failed to trigger AI observe:', err);
+    } finally {
+      setAiInspecting(false);
     }
   };
 
@@ -490,24 +500,60 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 )}
 
                 {/* AI Photo Observation */}
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1.5">
+                <div className={`border rounded-xl p-3.5 space-y-2 ${
+                  selectedReport.ai_observation?.includes('INVALID') || selectedReport.ai_observation?.includes('IRRELEVANT')
+                    ? 'bg-rose-50/80 border-rose-200'
+                    : selectedReport.ai_observation?.includes('AI VISION')
+                    ? 'bg-indigo-50/70 border-indigo-200'
+                    : 'bg-slate-50 border-slate-200'
+                }`}>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900">
                       <Bot className="w-4 h-4 text-indigo-600" />
-                      <span>AI Photo Observation</span>
+                      <span>Multimodal AI Vision Assessment</span>
                     </div>
-                    {!selectedReport.ai_observation && selectedReport.photo_url && (
+                    {selectedReport.photo_url && (
                       <button
-                        onClick={() => handleTriggerAiObserve(selectedReport.id)}
-                        className="text-[10px] text-indigo-600 hover:text-indigo-800 underline font-medium cursor-pointer"
+                        onClick={() => handleTriggerAiObserve(selectedReport)}
+                        disabled={aiInspecting}
+                        className="text-[10px] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-2.5 py-1 rounded-md font-semibold transition cursor-pointer flex items-center gap-1 shadow-2xs"
                       >
-                        Inspect with AI
+                        {aiInspecting ? (
+                          <>
+                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            <span>Analyzing Imagery...</span>
+                          </>
+                        ) : (
+                          <span>{selectedReport.ai_observation ? 'Re-inspect with AI' : 'Inspect with AI'}</span>
+                        )}
                       </button>
                     )}
                   </div>
-                  <div className="text-xs text-slate-700 font-mono leading-relaxed">
-                    {selectedReport.ai_observation || 'Observation pending physical inspection.'}
-                  </div>
+
+                  {selectedReport.ai_observation ? (
+                    <div className="space-y-1.5">
+                      {selectedReport.ai_observation.includes('INVALID') || selectedReport.ai_observation.includes('IRRELEVANT') ? (
+                        <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 uppercase">
+                          <AlertTriangle className="w-3 h-3" />
+                          <span>Non-Field Media Detected</span>
+                        </div>
+                      ) : (
+                        <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 uppercase">
+                          <CheckCircle className="w-3 h-3" />
+                          <span>Field Failure Verified</span>
+                        </div>
+                      )}
+                      <div className="text-xs text-slate-800 leading-relaxed font-sans font-normal">
+                        {selectedReport.ai_observation}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-500 italic">
+                      {selectedReport.photo_url
+                        ? 'Click "Inspect with AI" to run computer vision feature extraction on the field imagery.'
+                        : 'No field photo attached to run vision inspection.'}
+                    </div>
+                  )}
                 </div>
 
                 {/* Description & Metadata */}

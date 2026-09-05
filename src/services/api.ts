@@ -26,6 +26,7 @@ import {
   FactorContribution
 } from '../types';
 import { supabase, ADMIN_EMAIL } from '../lib/supabase';
+import { analyzeFieldImage } from '../lib/aiVision';
 
 // ============================================================================
 // Curated Mock Data & Client Simulation Models
@@ -1118,15 +1119,39 @@ class ApiService {
     };
   }
 
-  public async triggerAiObserve(reportId: string): Promise<{ observation: string }> {
+  public async triggerAiObserve(
+    reportId: string,
+    imageBase64?: string,
+    hazardType?: string,
+    description?: string
+  ): Promise<{ observation: string }> {
     try {
       return await this.request(`/api/v1/reports/${reportId}/ai-observe`, {
         method: 'POST',
       });
     } catch {
-      return {
-        observation: 'Computer vision analysis identifies active tension scarp with high water pore pressure seepage. Immediate revetment recommended.'
-      };
+      const report = this.dynamicReports.find(r => r.id === reportId);
+      const img = imageBase64 || report?.photo_url || report?.image_url || '';
+      const type = hazardType || report?.hazard_type || 'Landslide / Slope Failure';
+      const desc = description || report?.description || '';
+
+      const observation = await analyzeFieldImage(img, type, desc);
+
+      if (report) {
+        report.ai_observation = observation;
+      }
+      this.dynamicReports = this.dynamicReports.map(r => r.id === reportId ? { ...r, ai_observation: observation } : r);
+
+      try {
+        await supabase.from('reports').update({
+          ai_observation: observation,
+          updated_at: new Date().toISOString()
+        }).eq('id', reportId);
+      } catch (sbErr) {
+        console.warn('Supabase ai_observation sync warning:', sbErr);
+      }
+
+      return { observation };
     }
   }
 
