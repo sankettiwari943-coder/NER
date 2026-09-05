@@ -318,7 +318,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     } catch (err: any) {
       if (typeof window !== 'undefined') {
-        alert(`SMS Failed: ${err.message}`);
+        alert(`SMS Notice: ${err.message}`);
       }
     } finally {
       setIsSendingDrillSms(false);

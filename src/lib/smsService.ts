@@ -20,25 +20,20 @@ export { DEFAULT_SECTORS };
 export async function sendLiveCellularSMS(targetNumber: string, messageText: string) {
   const cleanNumber = targetNumber.replace(/\D/g, '').slice(-10);
   if (!cleanNumber || cleanNumber.length !== 10) {
-    throw new Error(`Invalid 10-digit Indian phone number: ${targetNumber}`);
+    throw new Error(`Invalid 10-digit phone number: ${targetNumber}`);
   }
 
   const encodedMsg = encodeURIComponent(messageText.slice(0, 140));
   const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${FAST2SMS_KEY}&route=q&message=${encodedMsg}&language=english&flash=0&numbers=${cleanNumber}`;
 
-  // Use both fetch with no-cors AND Image beacon to guarantee browser fires the cellular request without CORS failure
+  // Fire using Image beacon to prevent browser CORS rejection
   try {
-    fetch(url, { method: 'GET', mode: 'no-cors' }).catch(() => {});
-  } catch (e) {}
-
-  if (typeof window !== 'undefined' && typeof Image !== 'undefined') {
-    try {
-      const beacon = new Image();
-      beacon.src = url;
-    } catch (e) {}
+    const beacon = new Image();
+    beacon.src = url;
+  } catch (e) {
+    console.error('Beacon dispatch failed:', e);
   }
 
-  console.log(`[SMS-DISPATCH] Cellular trigger dispatched to +91 ${cleanNumber}`);
   return true;
 }
 
@@ -48,27 +43,29 @@ export async function dispatchRealSMS(sector: string, messageBody: string, overr
   if (overrideNumber) {
     recipients = [overrideNumber.replace(/\D/g, '').slice(-10)];
   } else {
-    // 1. Fetch real subscribers from Supabase profiles
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('phone_number')
-      .not('phone_number', 'is', null);
+    try {
+      // Correct Supabase syntax: use direct select and filter in JS
+      const { data: profiles, error } = await supabase
+        .from('profiles')
+        .select('phone_number');
 
-    if (profiles && profiles.length > 0) {
-      recipients = profiles
-        .map(p => p.phone_number ? p.phone_number.replace(/\D/g, '').slice(-10) : '')
-        .filter(n => n.length === 10 && n !== '9876543210');
+      if (!error && profiles && profiles.length > 0) {
+        recipients = profiles
+          .map((p: any) => (p.phone_number ? p.phone_number.replace(/\D/g, '').slice(-10) : ''))
+          .filter((n: string) => n.length === 10 && n !== '9876543210');
+      }
+    } catch (dbErr) {
+      console.warn('Could not read profiles, falling back to direct prompt:', dbErr);
     }
   }
 
-  // 2. If no valid number exists in DB, prompt the user on-screen immediately
+  // If no registered phone number is found, prompt directly
   if (recipients.length === 0 && typeof window !== 'undefined') {
-    const inputNum = window.prompt("Enter your 10-digit mobile number to receive the live cellular NDMA SMS alert:", "");
+    const inputNum = window.prompt("Enter your 10-digit mobile number to receive the cellular NDMA alert:", "");
     if (inputNum) {
       const clean = inputNum.replace(/\D/g, '').slice(-10);
       if (clean.length === 10) {
         recipients = [clean];
-        // Save to active user profile
         try {
           const { data: { user } } = await supabase.auth.getUser();
           if (user) {
@@ -78,35 +75,35 @@ export async function dispatchRealSMS(sector: string, messageBody: string, overr
               sms_alerts_enabled: true
             });
           }
-        } catch (authErr) {
-          console.warn('Profile save note:', authErr);
+        } catch (saveErr) {
+          console.warn('Profile sync skipped:', saveErr);
         }
       }
     }
   }
 
   if (recipients.length === 0) {
-    throw new Error("No phone number available to dispatch SMS. Please provide a 10-digit mobile number.");
+    throw new Error("No valid 10-digit phone number provided.");
   }
 
-  // 3. Fire real SMS to each recipient
+  // Send real cellular SMS
   for (const phone of recipients) {
     await sendLiveCellularSMS(phone, messageBody);
   }
 
-  // 4. Save directly into Supabase sms_logs
-  const logRows = recipients.map(phone => ({
-    recipient_phone: `+91 ${phone}`,
-    alert_title: `Sector Alert: ${sector}`,
-    message_body: messageBody,
-    dispatched_by: 'sankettiwari943@gmail.com',
-    delivery_status: 'DELIVERED'
-  }));
-
+  // Record audit log
   try {
+    const logRows = recipients.map(phone => ({
+      recipient_phone: `+91 ${phone}`,
+      alert_title: `Sector Alert: ${sector}`,
+      message_body: messageBody,
+      dispatched_by: 'sankettiwari943@gmail.com',
+      delivery_status: 'DELIVERED'
+    }));
+
     await supabase.from('sms_logs').insert(logRows);
   } catch (logErr) {
-    console.warn('Supabase sms_logs insert note:', logErr);
+    console.warn('Log table insertion skipped:', logErr);
   }
 
   return { success: true, count: recipients.length, numbers: recipients };
