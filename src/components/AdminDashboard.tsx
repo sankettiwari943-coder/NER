@@ -398,8 +398,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             {filteredReports.length === 0 ? (
-              <div className="py-12 text-center text-slate-400 text-xs">
-                No incident reports match the current filter.
+              <div className="py-16 text-center text-slate-500 text-sm">
+                No incident reports submitted yet. Live submissions will appear here.
               </div>
             ) : (
               <div className="space-y-2.5 max-h-[600px] overflow-y-auto pr-1">

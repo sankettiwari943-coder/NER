@@ -84,7 +84,7 @@ const AppContent: React.FC = () => {
       setAlerts(alertRes.alerts);
       setReports(allRepRes.reports);
 
-      if (api.getToken()) {
+      if (user) {
         const uRepRes = await api.getUserReports();
         setUserReports(uRepRes.reports);
       } else {
@@ -93,7 +93,7 @@ const AppContent: React.FC = () => {
     } catch (err) {
       console.error('Failed to load global data:', err);
     }
-  }, []);
+  }, [user]);
 
   // Initial load
   useEffect(() => {

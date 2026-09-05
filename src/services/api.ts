@@ -25,7 +25,7 @@ import {
   AnalyticsData,
   FactorContribution
 } from '../types';
-import { supabase } from '../lib/supabase';
+import { supabase, ADMIN_EMAIL } from '../lib/supabase';
 
 // ============================================================================
 // Curated Mock Data & Client Simulation Models
@@ -506,26 +506,22 @@ class ApiService {
 
   // Auth
   public async login(email: string, password: string): Promise<{ user: User; token: string }> {
-    try {
-      const data = await this.request<{ user: User; token: string }>('/api/v1/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-      this.setToken(data.token);
-      return data;
-    } catch {
-      const mockToken = 'jwt_mock_token_' + Date.now();
-      const mockUser: User = {
-        id: 'usr_local',
-        email,
-        full_name: email.split('@')[0] || 'Field Analyst',
-        role: email.includes('admin') ? 'ADMIN' : 'USER',
-        organization: 'NER Disaster Intelligence Field Group',
-        created_at: new Date().toISOString()
-      };
-      this.setToken(mockToken);
-      return { user: mockUser, token: mockToken };
+    const res = await supabase.auth.signInWithPassword({ email, password });
+    if (res.error) {
+      throw res.error;
     }
+    const sbUser = res.data.user;
+    const token = res.data.session?.access_token || '';
+    this.setToken(token);
+    const user: User = {
+      id: sbUser.id,
+      email: sbUser.email || email,
+      full_name: sbUser.user_metadata?.full_name || email.split('@')[0],
+      role: (sbUser.email === ADMIN_EMAIL || sbUser.email === 'sankettiwari943@gmail.com') ? 'ADMIN' : 'USER',
+      organization: sbUser.user_metadata?.organization || 'NER Disaster Network',
+      created_at: sbUser.created_at
+    };
+    return { user, token };
   }
 
   public async signup(payload: {
@@ -537,51 +533,58 @@ class ApiService {
     organization?: string;
     phone?: string;
   }): Promise<{ user: User; token: string }> {
-    try {
-      const data = await this.request<{ user: User; token: string }>('/api/v1/auth/signup', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      this.setToken(data.token);
-      return data;
-    } catch {
-      const mockToken = 'jwt_mock_token_' + Date.now();
-      const mockUser: User = {
-        id: 'usr_' + Date.now(),
-        email: payload.email,
-        full_name: payload.full_name,
-        role: payload.role || 'USER',
-        organization: payload.organization || 'NER Disaster Management',
-        phone: payload.phone,
-        created_at: new Date().toISOString()
-      };
-      this.setToken(mockToken);
-      return { user: mockUser, token: mockToken };
+    const res = await supabase.auth.signUp({
+      email: payload.email,
+      password: payload.password,
+      options: {
+        data: {
+          full_name: payload.full_name,
+          role: payload.role || 'citizen',
+          organization: payload.organization,
+          phone: payload.phone
+        }
+      }
+    });
+    if (res.error) {
+      throw res.error;
     }
+    const sbUser = res.data.user!;
+    const token = res.data.session?.access_token || '';
+    this.setToken(token);
+    const user: User = {
+      id: sbUser?.id || `usr_${Date.now()}`,
+      email: sbUser?.email || payload.email,
+      full_name: payload.full_name,
+      role: (payload.email === ADMIN_EMAIL || payload.email === 'sankettiwari943@gmail.com') ? 'ADMIN' : 'USER',
+      organization: payload.organization || 'NER Disaster Network',
+      phone: payload.phone,
+      created_at: sbUser?.created_at || new Date().toISOString()
+    };
+    return { user, token };
   }
 
   public async logout(): Promise<void> {
     try {
-      await this.request('/api/v1/auth/logout', { method: 'POST' });
-    } finally {
-      this.setToken(null);
-    }
+      await supabase.auth.signOut();
+    } catch {}
+    this.setToken(null);
   }
 
   public async getMe(): Promise<{ user: User }> {
-    try {
-      return await this.request('/api/v1/auth/me');
-    } catch {
-      const mockUser: User = {
-        id: 'usr_analyst_01',
-        email: 'analyst@ner-landslides.gov.in',
-        full_name: 'NER Field Analyst',
-        role: 'USER',
-        organization: 'Geological Survey of India NER',
-        created_at: new Date().toISOString()
-      };
-      return { user: mockUser };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      throw new Error('Unauthenticated');
     }
+    return {
+      user: {
+        id: user.id,
+        email: user.email || '',
+        full_name: user.user_metadata?.full_name || 'Citizen User',
+        role: (user.email === ADMIN_EMAIL || user.email === 'sankettiwari943@gmail.com') ? 'ADMIN' : 'USER',
+        organization: user.user_metadata?.organization || 'NER Field Network',
+        created_at: user.created_at
+      }
+    };
   }
 
 
@@ -834,44 +837,46 @@ class ApiService {
   }
 
   // Citizen Reports & Offline Sync
-  private dynamicReports: CitizenReport[] = [
-    {
-      id: 'rep_01',
-      user_id: 'usr_01',
-      user_name: 'T. Jamir (Observer)',
-      hazard_type: 'Longitudinal Tension Crack',
-      description: '12-meter tension crack observed running parallel to outer shoulder along NH-29 chainage KM 18.2.',
-      severity: 'HIGH',
-      location_name: 'Dzüdza River Valley, Nagaland',
-      latitude: 25.6800,
-      longitude: 93.8000,
-      verification_status: 'VERIFIED',
-      ai_observation: 'AI Vision confirmed progressive tensile separation along road sub-base.',
-      created_at: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
-      updated_at: new Date().toISOString()
-    },
-    {
-      id: 'rep_02',
-      user_id: 'usr_02',
-      user_name: 'K. Debbarma',
-      hazard_type: 'Mudslide / Mud Debris',
-      description: 'Toe scouring and culvert blockage causing sheet flow across hill cutting.',
-      severity: 'MODERATE',
-      location_name: 'Jatinga Chute, Dima Hasao',
-      latitude: 25.1834,
-      longitude: 93.0289,
-      verification_status: 'UNDER REVIEW',
-      created_at: new Date(Date.now() - 3600 * 1000 * 12).toISOString(),
-      updated_at: new Date().toISOString()
-    }
-  ];
+  private dynamicReports: CitizenReport[] = [];
 
   public async getUserReports(): Promise<{ reports: CitizenReport[] }> {
     try {
-      const res = await this.getReports();
-      return { reports: res.reports };
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) {
+        return { reports: [] };
+      }
+      const { data, error } = await supabase
+        .from('reports')
+        .select('*')
+        .or(`user_id.eq.${user.id},reporter_email.eq.${user.email}`);
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const mapped: CitizenReport[] = data.map((r: any) => ({
+          id: r.id || `rep_${Date.now()}`,
+          user_id: r.user_id || user.id,
+          user_name: r.reporter_name || user.user_metadata?.full_name || 'Field Observer',
+          hazard_type: r.hazard_type || r.issue_type || 'Debris Flow',
+          description: r.description || '',
+          severity: r.severity || 'HIGH',
+          location_name: r.location_name || 'Field Observation Point',
+          latitude: Number(r.latitude) || 25.6747,
+          longitude: Number(r.longitude) || 94.1105,
+          verification_status: (r.verification_status || (r.status === 'APPROVED' ? 'VERIFIED' : r.status === 'REJECTED' ? 'REJECTED' : 'UNVERIFIED')) as any,
+          admin_notes: r.admin_notes || r.note,
+          created_at: r.created_at || new Date().toISOString(),
+          updated_at: r.updated_at || r.created_at || new Date().toISOString()
+        }));
+        return { reports: mapped };
+      }
+
+      // Check dynamicReports for current user's locally submitted reports
+      const sessionUserReports = this.dynamicReports.filter(
+        r => r.user_id === user.id || (user.email && r.user_id === user.email)
+      );
+      return { reports: sessionUserReports };
     } catch {
-      return { reports: this.dynamicReports };
+      return { reports: [] };
     }
   }
 
@@ -1069,6 +1074,17 @@ class ApiService {
         };
 
     this.dynamicReports = this.dynamicReports.map(r => r.id === reportId ? updated : r);
+
+    try {
+      await supabase.from('reports').update({
+        status: status === 'VERIFIED' ? 'APPROVED' : status === 'REJECTED' ? 'REJECTED' : status,
+        verification_status: status,
+        admin_notes: note,
+        updated_at: new Date().toISOString()
+      }).eq('id', reportId);
+    } catch (sbErr) {
+      console.warn('Supabase status update error:', sbErr);
+    }
 
     try {
       await this.request(`/api/v1/reports/${reportId}/status`, {

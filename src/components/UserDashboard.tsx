@@ -168,10 +168,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
           </div>
 
           {userReports.length === 0 ? (
-            <div className="text-center py-10 text-slate-400 border border-dashed border-slate-200 rounded-xl">
-              <FileCheck className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" />
-              <p className="text-sm font-medium text-slate-700">No reports submitted yet.</p>
-              <p className="text-xs text-slate-500 mt-1">Capture landslide tension cracks, debris slides, or blocked culverts to aid regional response.</p>
+            <div className="py-12 text-center text-slate-500 text-sm">
+              You haven't submitted any hazard reports yet.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
