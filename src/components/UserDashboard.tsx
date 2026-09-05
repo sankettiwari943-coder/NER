@@ -21,7 +21,18 @@ import {
   Droplets,
   Sliders,
   Satellite,
-  Info
+  Info,
+  RefreshCw,
+  Eye,
+  CheckCircle2,
+  Clock3,
+  XCircle,
+  AlertCircle,
+  Sparkles,
+  ExternalLink,
+  X,
+  Filter,
+  Camera
 } from 'lucide-react';
 import { LocationPoint, RiskAssessment, WeatherData, OutlookDay, CitizenReport, Alert } from '../types';
 import { WhatIfSimulator } from './WhatIfSimulator';
@@ -36,6 +47,7 @@ interface UserDashboardProps {
   alerts: Alert[];
   onOpenReportModal: () => void;
   onOpenMap: () => void;
+  onRefreshData?: () => Promise<void> | void;
 }
 
 export const UserDashboard: React.FC<UserDashboardProps> = ({
@@ -48,11 +60,42 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   alerts,
   onOpenReportModal,
   onOpenMap,
+  onRefreshData,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'simulator' | 'myreports'>('overview');
+  const [submissionFilter, setSubmissionFilter] = useState<'ALL' | 'PENDING' | 'UNDER REVIEW' | 'VERIFIED' | 'REJECTED'>('ALL');
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const compositeScore = risk?.compositeScore ?? risk?.riskScore ?? 88;
   const isCritical = (risk?.riskLevel === 'CRITICAL') || compositeScore >= 80;
+
+  const handleRefresh = async () => {
+    if (onRefreshData) {
+      setIsRefreshing(true);
+      try {
+        await onRefreshData();
+      } finally {
+        setTimeout(() => setIsRefreshing(false), 500);
+      }
+    }
+  };
+
+  // Metrics counts
+  const totalCount = userReports.length;
+  const pendingCount = userReports.filter(r => r.verification_status === 'UNVERIFIED' || r.verification_status === 'PENDING' || !r.verification_status).length;
+  const underReviewCount = userReports.filter(r => r.verification_status === 'UNDER REVIEW').length;
+  const verifiedCount = userReports.filter(r => r.verification_status === 'VERIFIED').length;
+  const rejectedCount = userReports.filter(r => r.verification_status === 'REJECTED').length;
+
+  const filteredUserReports = submissionFilter === 'ALL'
+    ? userReports
+    : userReports.filter(r => {
+        if (submissionFilter === 'PENDING') {
+          return r.verification_status === 'UNVERIFIED' || r.verification_status === 'PENDING' || !r.verification_status;
+        }
+        return r.verification_status === submissionFilter;
+      });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -150,57 +193,320 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
         />
       )}
 
-      {/* SUBTAB: USER'S SUBMITTED REPORTS */}
+      {/* SUBTAB: USER'S SUBMITTED REPORTS & LIVE STATUS TRACKING */}
       {activeSubTab === 'myreports' && (
-        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">My Submitted Incident Reports</h2>
-              <p className="text-xs text-slate-500">Field observations logged by your account. Verified records sync to public and emergency feeds.</p>
+        <div className="space-y-5">
+          {/* Header Card */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <FileCheck className="w-5 h-5 text-indigo-600" />
+                  <span>My Submissions &amp; Status Tracking</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Review field incident reports submitted from your account, inspect photo evidence, and track verification feedback from NDMA authorities.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  id="btn-refresh-user-reports"
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer disabled:opacity-50"
+                  title="Sync with live Supabase database"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-slate-600 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshing ? 'Syncing...' : 'Refresh Status'}</span>
+                </button>
+                <button
+                  id="btn-new-report-dashboard"
+                  onClick={onOpenReportModal}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Log Field Incident</span>
+                </button>
+              </div>
             </div>
-            <button
-              id="btn-new-report-dashboard"
-              onClick={onOpenReportModal}
-              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-medium shadow-sm transition cursor-pointer"
-            >
-              Submit New Report
-            </button>
+
+            {/* Status Summary KPI Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 text-center">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Filed</div>
+                <div className="text-xl font-bold text-slate-900 mt-0.5">{totalCount}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">All submissions</div>
+              </div>
+
+              <div className="bg-amber-50/60 border border-amber-200/80 rounded-lg p-3 text-center">
+                <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">Pending</div>
+                <div className="text-xl font-bold text-amber-900 mt-0.5">{pendingCount}</div>
+                <div className="text-[10px] text-amber-600 mt-0.5">Awaiting triage</div>
+              </div>
+
+              <div className="bg-blue-50/60 border border-blue-200/80 rounded-lg p-3 text-center">
+                <div className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">Under Review</div>
+                <div className="text-xl font-bold text-blue-900 mt-0.5">{underReviewCount}</div>
+                <div className="text-[10px] text-blue-600 mt-0.5">NDMA assessment</div>
+              </div>
+
+              <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-lg p-3 text-center">
+                <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Verified</div>
+                <div className="text-xl font-bold text-emerald-900 mt-0.5">{verifiedCount}</div>
+                <div className="text-[10px] text-emerald-600 mt-0.5">Live on feed</div>
+              </div>
+
+              <div className="bg-rose-50/40 border border-slate-200/80 rounded-lg p-3 text-center col-span-2 sm:col-span-1">
+                <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Rejected</div>
+                <div className="text-xl font-bold text-slate-700 mt-0.5">{rejectedCount}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Unconfirmed</div>
+              </div>
+            </div>
+
+            {/* Filter Tabs / Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100">
+              <span className="text-xs font-bold text-slate-500 mr-1 flex items-center gap-1">
+                <Filter className="w-3 h-3 text-slate-400" />
+                <span>Filter:</span>
+              </span>
+              {(['ALL', 'PENDING', 'UNDER REVIEW', 'VERIFIED', 'REJECTED'] as const).map((filterVal) => {
+                const count =
+                  filterVal === 'ALL'
+                    ? totalCount
+                    : filterVal === 'PENDING'
+                    ? pendingCount
+                    : filterVal === 'UNDER REVIEW'
+                    ? underReviewCount
+                    : filterVal === 'VERIFIED'
+                    ? verifiedCount
+                    : rejectedCount;
+
+                return (
+                  <button
+                    key={filterVal}
+                    onClick={() => setSubmissionFilter(filterVal)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                      submissionFilter === filterVal
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <span>{filterVal}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                        submissionFilter === filterVal
+                          ? 'bg-indigo-800 text-white'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {userReports.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 text-sm">
-              You haven't submitted any hazard reports yet.
+          {/* Submissions List */}
+          {filteredUserReports.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-xl p-12 text-center space-y-3 shadow-xs">
+              <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
+                <Mountain className="w-6 h-6" />
+              </div>
+              {userReports.length === 0 ? (
+                <>
+                  <div className="text-sm font-semibold text-slate-700">You haven't submitted any hazard reports yet.</div>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    Spot a landslide, debris flow, rockfall, or road tension crack? Submit a field report with photo evidence to alert NDMA authorities.
+                  </p>
+                  <button
+                    onClick={onOpenReportModal}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs transition cursor-pointer"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Submit Your First Report</span>
+                  </button>
+                </>
+              ) : (
+                <div className="text-sm text-slate-500">
+                  No submissions found matching the <strong className="text-slate-700">"{submissionFilter}"</strong> filter.
+                </div>
+              )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {userReports.map(rep => (
-                <div key={rep.id} className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 flex gap-3 text-xs shadow-2xs">
-                  {rep.photo_url && (
-                    <img src={rep.photo_url} alt="Hazard photo" className="w-20 h-20 object-cover rounded-lg border border-slate-200 shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-rose-700 truncate">{rep.hazard_type}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        rep.verification_status === 'VERIFIED'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : rep.verification_status === 'UNDER REVIEW'
-                          ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                          : rep.verification_status === 'REJECTED'
-                          ? 'bg-slate-100 text-slate-600 border border-slate-200'
-                          : 'bg-amber-50 text-amber-700 border border-amber-200'
-                      }`}>
-                        {rep.verification_status === 'UNVERIFIED' ? 'PENDING' : rep.verification_status}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {filteredUserReports.map((rep) => {
+                const photoSrc = rep.photo_url || rep.image_url || rep.photo;
+                const status = rep.verification_status || 'UNVERIFIED';
+                const isPending = status === 'UNVERIFIED' || status === 'PENDING';
+                const isUnderReview = status === 'UNDER REVIEW';
+                const isVerified = status === 'VERIFIED';
+                const isRejected = status === 'REJECTED';
+
+                return (
+                  <div
+                    key={rep.id}
+                    className="bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-4 shadow-xs hover:shadow-sm transition flex flex-col justify-between space-y-3.5"
+                  >
+                    {/* Card Header */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-slate-900 text-sm">{rep.hazard_type || 'Field Hazard Report'}</span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                              rep.severity === 'CRITICAL'
+                                ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                                : rep.severity === 'HIGH'
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                : rep.severity === 'MODERATE'
+                                ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                                : 'bg-slate-100 text-slate-700 border border-slate-300'
+                            }`}
+                          >
+                            {rep.severity || 'HIGH'} SEVERITY
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                          <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          <span className="truncate">{rep.location_name || 'Corridor Location'}</span>
+                          <span className="text-slate-400 font-mono text-[11px]">
+                            ({rep.latitude.toFixed(4)}°N, {rep.longitude.toFixed(4)}°E)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Status Badge */}
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 shrink-0 border ${
+                          isVerified
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                            : isUnderReview
+                            ? 'bg-blue-50 text-blue-700 border-blue-300'
+                            : isRejected
+                            ? 'bg-slate-100 text-slate-600 border-slate-300'
+                            : 'bg-amber-50 text-amber-700 border-amber-300'
+                        }`}
+                      >
+                        {isVerified ? (
+                          <>
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>OFFICIALLY VERIFIED</span>
+                          </>
+                        ) : isUnderReview ? (
+                          <>
+                            <Clock3 className="w-3 h-3 text-blue-600" />
+                            <span>UNDER REVIEW BY NDMA</span>
+                          </>
+                        ) : isRejected ? (
+                          <>
+                            <XCircle className="w-3 h-3 text-slate-500" />
+                            <span>REJECTED / INVALID</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertCircle className="w-3 h-3 text-amber-600" />
+                            <span>PENDING VERIFICATION</span>
+                          </>
+                        )}
                       </span>
                     </div>
-                    <div className="text-slate-500 text-[11px] truncate font-medium">{rep.location_name}</div>
-                    <div className="text-slate-700 mt-1 line-clamp-2">{rep.description}</div>
-                    <div className="text-slate-400 text-[10px] mt-2 font-mono">
-                      Submitted on {new Date(rep.created_at).toLocaleDateString()}
+
+                    {/* Card Body: Description & Photo Evidence */}
+                    <div className="space-y-2.5">
+                      <p className="text-xs text-slate-700 leading-relaxed bg-slate-50/70 p-2.5 rounded-lg border border-slate-100">
+                        {rep.description || 'No additional narrative observation provided.'}
+                      </p>
+
+                      {/* Photo Evidence Box */}
+                      {photoSrc ? (
+                        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-2">
+                          <div
+                            onClick={() =>
+                              setPreviewImage({
+                                url: photoSrc,
+                                title: `${rep.hazard_type} - ${rep.location_name}`
+                              })
+                            }
+                            className="relative group cursor-pointer w-16 h-16 rounded-md overflow-hidden bg-slate-900 shrink-0 border border-slate-300"
+                          >
+                            <img
+                              src={photoSrc}
+                              alt="Incident photo evidence"
+                              className="w-full h-full object-cover transition group-hover:scale-105 opacity-90 group-hover:opacity-100"
+                            />
+                            <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 flex items-center justify-center transition">
+                              <Eye className="w-4 h-4 text-white opacity-80 group-hover:opacity-100" />
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                              <Camera className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>Photographic Field Evidence</span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5">Attached image submitted to NDMA disaster verification dossier.</p>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewImage({
+                                  url: photoSrc,
+                                  title: `${rep.hazard_type} - ${rep.location_name}`
+                                })
+                              }
+                              className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline inline-flex items-center gap-1 mt-1 cursor-pointer"
+                            >
+                              <span>Inspect Full Photo</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-400 italic px-2">
+                          No photographic evidence attached with this submission.
+                        </div>
+                      )}
+
+                      {/* AI Vision Observation Banner (if available) */}
+                      {rep.ai_observation && (
+                        <div className="p-2.5 bg-indigo-50/70 border border-indigo-100 rounded-lg text-xs space-y-1">
+                          <div className="flex items-center gap-1.5 text-indigo-900 font-bold text-[11px]">
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>AI Vision Morphological Assessment</span>
+                          </div>
+                          <p className="text-indigo-950 text-[11px] leading-relaxed">
+                            {rep.ai_observation}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* NDMA Authority Feedback Banner (if available) */}
+                      {rep.admin_notes && (
+                        <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-lg text-xs space-y-1">
+                          <div className="flex items-center gap-1.5 text-emerald-900 font-bold text-[11px]">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>NDMA Authority Review Directive</span>
+                          </div>
+                          <p className="text-emerald-950 text-[11px] leading-relaxed font-medium">
+                            {rep.admin_notes}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Card Footer */}
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[10px] text-slate-400 font-mono">
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-slate-400" />
+                        <span>Submitted {new Date(rep.created_at).toLocaleDateString()} at {new Date(rep.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">
+                        #{rep.id ? rep.id.slice(0, 8).toUpperCase() : 'PENDING'}
+                      </span>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -413,6 +719,55 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                   <div className="text-[9px] text-slate-400 font-mono tracking-tighter">FORECAST</div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox Photo Preview Modal */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-200"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-900/90">
+              <div className="flex items-center gap-2 text-white">
+                <Camera className="w-4 h-4 text-indigo-400" />
+                <span className="text-sm font-bold truncate">{previewImage.title}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Image Container */}
+            <div className="flex-1 bg-black/95 p-4 flex items-center justify-center overflow-auto max-h-[75vh]">
+              <img
+                src={previewImage.url}
+                alt={previewImage.title}
+                className="max-h-[70vh] max-w-full object-contain rounded-lg shadow-lg"
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-2.5 bg-slate-900 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+              <span>Field Photographic Evidence Record &bull; NDMA Dossier</span>
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-xs font-medium transition cursor-pointer"
+              >
+                Close Preview
+              </button>
             </div>
           </div>
         </div>

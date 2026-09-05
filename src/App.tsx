@@ -227,6 +227,7 @@ const AppContent: React.FC = () => {
             alerts={alerts}
             onOpenReportModal={() => setIsReportModalOpen(true)}
             onOpenMap={() => setCurrentTab('map')}
+            onRefreshData={refreshGlobalData}
           />
         )}
 
