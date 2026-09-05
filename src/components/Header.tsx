@@ -52,11 +52,11 @@ export const Header: React.FC<HeaderProps> = ({
   const { user, logout, fastLogin, isAdmin } = useAuth();
   const {
     isOnline,
-    isSimulatedOffline,
     queuedCount,
     isSyncing,
     triggerManualSync,
-    toggleSimulatedOffline
+    goOnline,
+    goOffline
   } = useOfflineSync();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -110,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="bg-slate-900 border-b border-slate-800 px-4 py-1.5 text-xs flex flex-wrap items-center justify-between gap-2 text-slate-200">
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {/* Dynamic Sync Status Pill (SIH Core Requirement) */}
-          {!isOnline || isSimulatedOffline ? (
+          {!isOnline ? (
             <div className="flex items-center gap-2 bg-amber-950/90 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-700/80 font-mono font-bold text-[11px] shadow-xs">
               <span className="flex h-2 w-2 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
@@ -134,11 +134,12 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Toggle to Reconnect */}
               <button
                 id="btn-toggle-online"
-                onClick={toggleSimulatedOffline}
-                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded text-[10px] font-medium transition cursor-pointer"
-                title="Restore simulated connection"
+                onClick={goOnline}
+                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded text-[10px] font-medium transition cursor-pointer flex items-center gap-1"
+                title="Switch back to live online sensor stream"
               >
-                Go Online
+                <Wifi className="w-3 h-3 text-emerald-400" />
+                <span>Go Online</span>
               </button>
             </div>
           ) : (
@@ -154,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Manual Go Offline Toggle Button for Demo Testing */}
               <button
                 id="btn-toggle-offline"
-                onClick={toggleSimulatedOffline}
+                onClick={goOffline}
                 className="ml-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded text-[10px] font-medium transition cursor-pointer flex items-center gap-1"
                 title="Simulate network disconnection in remote NER sector"
               >

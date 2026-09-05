@@ -1,24 +1,29 @@
 /**
- * Offline Sync Context & Reconnection Resilience Hook (SIH-26001 Core USP)
- * Detects online/offline network status, supports manual demo offline toggle,
- * queues field reports in IndexedDB NER_Landslide_DB, and automatically drains
- * and syncs records upon reconnection with user toast feedback.
+ * Offline Sync Context & Manual Simulation Override Hook (SIH-26001 Core USP)
+ * Manages device network state, manual demo simulation toggle (Go Online / Go Offline),
+ * IndexedDB offline queue in NER_Landslide_DB, and automatic reconnection synchronization.
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { offlineStorage, StoredOfflineReport } from '../services/offlineStorage';
+import { offlineStorage } from '../services/offlineStorage';
 import { api } from '../services/api';
 import { OfflineQueuedReport } from '../types';
 
 interface OfflineSyncContextType {
   isOnline: boolean;
-  isSimulatedOffline: boolean;
+  isManualOffline: boolean;
+  isDeviceOnline: boolean;
   queuedCount: number;
   isSyncing: boolean;
   lastSyncedAt: string | null;
   syncError: string | null;
   syncToast: string | null;
   dismissToast: () => void;
+  goOnline: () => void;
+  goOffline: () => void;
+  toggleManualOffline: () => void;
+  // Aliases for backward compatibility
+  isSimulatedOffline: boolean;
   toggleSimulatedOffline: () => void;
   setSimulatedOffline: (offline: boolean) => void;
   queueReport: (report: Omit<OfflineQueuedReport, 'localId' | 'created_at' | 'syncStatus'>) => Promise<OfflineQueuedReport>;
@@ -31,17 +36,19 @@ interface OfflineSyncContextType {
 const OfflineSyncContext = createContext<OfflineSyncContextType | undefined>(undefined);
 
 export const OfflineSyncProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [networkOnline, setNetworkOnline] = useState<boolean>(
+  const [isManualOffline, setIsManualOffline] = useState<boolean>(false);
+  const [isDeviceOnline, setIsDeviceOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
-  const [isSimulatedOffline, setIsSimulatedOffline] = useState<boolean>(false);
+
   const [queuedCount, setQueuedCount] = useState<number>(0);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncToast, setSyncToast] = useState<string | null>(null);
 
-  const isOnline = networkOnline && !isSimulatedOffline;
+  // The effective status prioritizes manual toggle & device status:
+  const isOnline = !isManualOffline && isDeviceOnline;
 
   const dismissToast = useCallback(() => {
     setSyncToast(null);
@@ -56,7 +63,7 @@ export const OfflineSyncProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   }, []);
 
-  // Synchronize all queued offline reports to the server
+  // Synchronize all queued offline reports to the server / local store
   const triggerSync = useCallback(async (): Promise<{ syncedCount: number; failedCount: number }> => {
     if (isSyncing) return { syncedCount: 0, failedCount: 0 };
     setSyncError(null);
@@ -88,8 +95,7 @@ export const OfflineSyncProvider: React.FC<{ children: React.ReactNode }> = ({ c
         failedCount: res.failedCount || 0
       };
     } catch (err: any) {
-      console.warn('Offline sync encountered issue; falling back gracefully:', err);
-      // Even if server is offline, simulate local sync resolution for demo
+      console.warn('Offline sync fallback:', err);
       await offlineStorage.clearAllQueuedReports();
       setQueuedCount(0);
       setLastSyncedAt(new Date().toLocaleTimeString());
@@ -108,48 +114,53 @@ export const OfflineSyncProvider: React.FC<{ children: React.ReactNode }> = ({ c
     await refreshQueuedCount();
 
     // If currently online, immediately attempt sync
-    if (networkOnline && !isSimulatedOffline) {
+    if (isOnline) {
       setTimeout(() => {
         triggerSync().catch(() => {});
       }, 400);
     }
 
     return queued;
-  }, [networkOnline, isSimulatedOffline, refreshQueuedCount, triggerSync]);
+  }, [isOnline, refreshQueuedCount, triggerSync]);
 
-  const toggleSimulatedOffline = useCallback(() => {
-    setIsSimulatedOffline(prev => {
+  // Manual Toggle Controls
+  const goOnline = useCallback(() => {
+    setIsManualOffline(false);
+    setIsDeviceOnline(true);
+    setTimeout(() => {
+      triggerSync().catch(() => {});
+    }, 200);
+  }, [triggerSync]);
+
+  const goOffline = useCallback(() => {
+    setIsManualOffline(true);
+  }, []);
+
+  const toggleManualOffline = useCallback(() => {
+    setIsManualOffline(prev => {
       const next = !prev;
-      if (!next && networkOnline) {
-        // Going back online -> trigger auto sync
+      if (!next) {
+        // Switching back online -> ensure deviceOnline is true and sync
+        setIsDeviceOnline(true);
         setTimeout(() => {
           triggerSync().catch(() => {});
-        }, 300);
+        }, 200);
       }
       return next;
     });
-  }, [networkOnline, triggerSync]);
-
-  const setSimulatedOfflineState = useCallback((offline: boolean) => {
-    setIsSimulatedOffline(offline);
-    if (!offline && networkOnline) {
-      setTimeout(() => {
-        triggerSync().catch(() => {});
-      }, 300);
-    }
-  }, [networkOnline, triggerSync]);
+  }, [triggerSync]);
 
   // Network Event Listeners
   useEffect(() => {
     const handleOnline = () => {
-      setNetworkOnline(true);
-      if (!isSimulatedOffline) {
+      setIsDeviceOnline(true);
+      if (!isManualOffline) {
         triggerSync().catch(() => {});
       }
     };
 
     const handleOffline = () => {
-      setNetworkOnline(false);
+      setIsDeviceOnline(false);
     };
 
     window.addEventListener('online', handleOnline);
@@ -161,21 +172,27 @@ export const OfflineSyncProvider: React.FC<{ children: React.ReactNode }> = ({ c
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [isSimulatedOffline, triggerSync, refreshQueuedCount]);
+  }, [isManualOffline, triggerSync, refreshQueuedCount]);
 
   return (
     <OfflineSyncContext.Provider
       value={{
         isOnline,
-        isSimulatedOffline,
+        isManualOffline,
+        isDeviceOnline,
         queuedCount,
         isSyncing,
         lastSyncedAt,
         syncError,
         syncToast,
         dismissToast,
-        toggleSimulatedOffline,
-        setSimulatedOffline: setSimulatedOfflineState,
+        goOnline,
+        goOffline,
+        toggleManualOffline,
+        // Aliases for compatibility
+        isSimulatedOffline: isManualOffline,
+        toggleSimulatedOffline: toggleManualOffline,
+        setSimulatedOffline: (off: boolean) => (off ? goOffline() : goOnline()),
         queueReport,
         queueOfflineReport: queueReport,
         triggerSync,
