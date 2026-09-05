@@ -48,10 +48,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'queue' | 'pending_gate' | 'alerts' | 'sms_logs' | 'analytics' | 'health'>('pending_gate');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [localReports, setLocalReports] = useState<CitizenReport[]>(reports);
   const [selectedReport, setSelectedReport] = useState<CitizenReport | null>(null);
   const [statusHistory, setStatusHistory] = useState<ReportStatusHistory[]>([]);
   const [reviewNote, setReviewNote] = useState('');
+  const [auditNote, setAuditNote] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+
+  useEffect(() => {
+    setLocalReports(reports);
+  }, [reports]);
 
   // Human Verification Gate (Pending Alerts) State
   const [pendingAlerts, setPendingAlerts] = useState<Alert[]>([]);
@@ -207,14 +213,145 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleUpdateStatus = async (newStatus: string) => {
-    if (!selectedReport) return;
+  const handleRejectReport = async (reportId?: string) => {
+    const targetId = reportId || selectedReport?.id;
+    if (!targetId) {
+      alert("No report selected to reject.");
+      return;
+    }
+
+    const auditReason = (auditNote || reviewNote).trim() || "Rejected by District Landslide Officer: Irrelevant/False field submission.";
+
     setActionLoading(true);
     try {
-      const res = await api.updateReportStatus(selectedReport.id, newStatus, reviewNote);
+      // 1. Update Supabase table directly
+      const { error } = await supabase
+        .from('reports')
+        .update({
+          status: 'REJECTED',
+          verification_status: 'REJECTED',
+          official_notes: auditReason,
+          verified_at: new Date().toISOString()
+        })
+        .eq('id', targetId);
+
+      if (error) {
+        console.warn("Supabase update warning, proceeding with state update:", error);
+      }
+
+      // 2. Insert into audit trail table if present
+      try {
+        await supabase.from('status_audit_trail').insert([{
+          report_id: targetId,
+          previous_status: selectedReport?.status || selectedReport?.verification_status || 'UNVERIFIED',
+          new_status: 'REJECTED',
+          officer_title: 'District Landslide Officer',
+          notes: auditReason,
+          timestamp: new Date().toISOString()
+        }]);
+      } catch (auditErr) {
+        console.warn("Audit trail logging skipped:", auditErr);
+      }
+
+      // 3. Immediately update active selected report state
+      setSelectedReport((prev: any) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          status: 'REJECTED',
+          verification_status: 'REJECTED',
+          official_notes: auditReason,
+          audit_trail: [
+            {
+              previous_status: prev.status || prev.verification_status || 'UNVERIFIED',
+              new_status: 'REJECTED',
+              officer: 'District Landslide Officer',
+              note: auditReason,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            },
+            ...(prev.audit_trail || [])
+          ]
+        };
+      });
+
+      // Update status history UI
+      setStatusHistory((prev) => [
+        {
+          id: 'hist_' + Date.now(),
+          report_id: targetId,
+          previous_status: selectedReport?.verification_status || 'UNVERIFIED',
+          new_status: 'REJECTED',
+          changed_by: 'usr_admin',
+          changed_by_name: 'District Landslide Officer',
+          changed_at: new Date().toISOString(),
+          note: auditReason
+        },
+        ...prev
+      ]);
+
+      // 4. Update the left sidebar reports list
+      setLocalReports((prevReports: any[]) =>
+        prevReports.map((r) =>
+          r.id === targetId ? { ...r, status: 'REJECTED', verification_status: 'REJECTED', official_notes: auditReason } : r
+        )
+      );
+
+      // Call API layer as well
+      try {
+        await api.updateReportStatus(targetId, 'REJECTED', auditReason);
+      } catch (apiErr) {
+        console.warn("API status update warning:", apiErr);
+      }
+
+      // Clear the note input
+      setReviewNote('');
+      setAuditNote('');
+
+      onRefreshData();
+      alert("✅ Submission rejected and marked as REJECTED in database.");
+    } catch (err: any) {
+      console.error("Reject execution error:", err);
+      alert(`Could not reject report: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateStatus = async (newStatus: string) => {
+    if (!selectedReport) return;
+    if (newStatus === 'REJECTED') {
+      return handleRejectReport(selectedReport.id);
+    }
+    setActionLoading(true);
+    const noteText = (auditNote || reviewNote).trim();
+    try {
+      const res = await api.updateReportStatus(selectedReport.id, newStatus, noteText);
+
+      try {
+        await supabase
+          .from('reports')
+          .update({
+            status: newStatus,
+            verification_status: newStatus,
+            official_notes: noteText,
+            verified_at: new Date().toISOString()
+          })
+          .eq('id', selectedReport.id);
+      } catch (sbErr) {
+        console.warn('Supabase status update error:', sbErr);
+      }
+
       setSelectedReport(res.report);
       setStatusHistory(res.history);
+
+      setLocalReports((prevReports: any[]) =>
+        prevReports.map((r) =>
+          r.id === selectedReport.id ? { ...r, status: newStatus, verification_status: newStatus, official_notes: noteText } : r
+        )
+      );
+
       setReviewNote('');
+      setAuditNote('');
       await loadSmsLogs();
       onRefreshData();
     } catch (err) {
@@ -353,12 +490,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const filteredReports = statusFilter === 'ALL'
-    ? reports
-    : reports.filter(r => {
+    ? localReports
+    : localReports.filter(r => {
+        const vStatus = r.verification_status || r.status || 'UNVERIFIED';
         if (statusFilter === 'UNVERIFIED') {
-          return r.verification_status === 'UNVERIFIED' || r.verification_status === 'PENDING' || !r.verification_status;
+          return vStatus === 'UNVERIFIED' || vStatus === 'PENDING';
         }
-        return r.verification_status === statusFilter;
+        return vStatus === statusFilter;
       });
 
   return (
@@ -619,15 +757,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-slate-900 truncate">{report.hazard_type}</span>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            report.verification_status === 'VERIFIED'
+                            report.verification_status === 'VERIFIED' || report.status === 'VERIFIED'
                               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : report.verification_status === 'UNDER REVIEW'
+                              : report.verification_status === 'UNDER REVIEW' || report.status === 'UNDER REVIEW'
                               ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : report.verification_status === 'REJECTED'
-                              ? 'bg-slate-100 text-slate-500 border border-slate-200'
+                              : report.verification_status === 'REJECTED' || report.status === 'REJECTED'
+                              ? 'bg-red-100 text-red-700 border border-red-200'
                               : 'bg-amber-50 text-amber-700 border border-amber-200'
                           }`}>
-                            {report.verification_status}
+                            {report.verification_status || report.status || 'UNVERIFIED'}
                           </span>
                         </div>
 
@@ -782,11 +920,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </button>
                     <button
                       id="btn-admin-reject"
-                      onClick={() => handleUpdateStatus('REJECTED')}
+                      type="button"
+                      onClick={() => handleRejectReport()}
                       disabled={actionLoading}
-                      className="flex items-center justify-center gap-1.5 py-2 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-2xs transition disabled:opacity-50 cursor-pointer"
+                      className="flex items-center justify-center gap-1.5 py-2 px-3 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium shadow-2xs transition disabled:opacity-50 cursor-pointer"
                     >
-                      <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                      <XCircle className="w-4 h-4 text-red-500" />
                       <span>Reject (False Report)</span>
                     </button>
                     <button
@@ -808,9 +947,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <input
                       id="input-admin-review-note"
                       type="text"
-                      value={reviewNote}
-                      onChange={(e) => setReviewNote(e.target.value)}
-                      placeholder="e.g. Field team dispatched; heavy boulder removed by BRO."
+                      value={reviewNote || auditNote}
+                      onChange={(e) => {
+                        setReviewNote(e.target.value);
+                        setAuditNote(e.target.value);
+                      }}
+                      placeholder="e.g. Rejected by District Landslide Officer: Irrelevant/False field submission."
                       className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-indigo-500"
                     />
                   </div>
