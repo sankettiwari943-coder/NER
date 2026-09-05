@@ -79,7 +79,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // SMS Alert Subscription State
-  const [phoneNumber, setPhoneNumber] = useState('+91 9876543210');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [assignedSector, setAssignedSector] = useState('Kohima (NH-29)');
   const [smsAlertsEnabled, setSmsAlertsEnabled] = useState(true);
   const [isSavingSms, setIsSavingSms] = useState(false);
@@ -101,9 +101,11 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             .single();
 
           if (data) {
-            setPhoneNumber(data.phone_number || user.phone || '+91 9876543210');
+            setPhoneNumber(data.phone_number || user.phone || '');
             setAssignedSector(data.assigned_sector || 'Kohima (NH-29)');
             setSmsAlertsEnabled(data.sms_alerts_enabled ?? true);
+          } else if (user.phone) {
+            setPhoneNumber(user.phone);
           }
         }
         const logsRes = await api.getSmsLogs();
@@ -149,7 +151,11 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
         action: 'Platform SMS gateway operational check. No emergency action required.',
         triggerType: 'TEST_BROADCAST'
       });
-      setTestSmsSuccess(`Emergency drill message dispatched to ${phoneNumber} (${res.dispatchedCount} cell subscriber gateway ACK).`);
+      if (res.dispatchedCount > 0) {
+        setTestSmsSuccess(`Emergency drill message dispatched to ${phoneNumber || 'registered subscriber'} via Fast2SMS.`);
+      } else {
+        setTestSmsSuccess(`Please make sure your phone number is saved first.`);
+      }
       const updatedLogs = await api.getSmsLogs();
       setSectorSmsLogs(updatedLogs.logs);
       setTimeout(() => setTestSmsSuccess(null), 5000);

@@ -95,8 +95,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const loadSmsLogs = async () => {
     setSmsLogsLoading(true);
     try {
-      const res = await api.getSmsLogs();
-      setSmsLogs(res.logs);
+      const { data } = await supabase
+        .from('sms_logs')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data && data.length > 0) {
+        setSmsLogs(
+          data.map((d: any) => ({
+            id: d.id || `sms_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            recipient_phone: d.recipient_phone || '',
+            recipient_name: d.recipient_name || 'Registered Resident',
+            recipient_sector: d.recipient_sector || d.alert_title?.replace('Sector Hazard: ', '') || 'Kohima (NH-29)',
+            message: d.message_body || d.message || '[NDMA ALERT] Landslide Hazard Warning.',
+            message_body: d.message_body || d.message,
+            alert_title: d.alert_title || 'Sector Hazard Alert',
+            severity: d.severity || 'CRITICAL',
+            trigger_type: d.trigger_type || 'CAP_BROADCAST',
+            delivery_status: d.delivery_status || 'DELIVERED_CARRIER',
+            gateway_response: d.gateway_response || 'Fast2SMS Cellular Gateway (route=q)',
+            dispatched_at: d.dispatched_at || d.created_at || new Date().toISOString(),
+            created_at: d.created_at || d.dispatched_at || new Date().toISOString()
+          }))
+        );
+      } else {
+        const res = await api.getSmsLogs();
+        setSmsLogs(res.logs);
+      }
     } catch (err) {
       console.error('Failed to load SMS logs:', err);
     } finally {
@@ -250,15 +275,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleAdminSendDrillSms = async () => {
     setIsSendingDrillSms(true);
     try {
-      const res = await api.dispatchEmergencySms({
-        title: 'NDMA Authority Sector Evacuation Drill',
-        locationName: 'Kohima NH-29 Choke KM 18',
-        sector: 'Kohima (NH-29)',
-        severity: 'CRITICAL',
-        action: 'Immediate evacuation drill broadcast via National Emergency Gateway.',
-        triggerType: 'TEST_BROADCAST'
-      });
-      setDrillSuccess(`Emergency broadcast drill dispatched to ${res.dispatchedCount} sector subscriber(s).`);
+      const res = await dispatchRealSMS(
+        'Kohima (NH-29)',
+        '[NDMA EMERGENCY ALERT] Severe landslide detected. Evacuation route active via NH-29.'
+      );
+      if (res.success) {
+        setDrillSuccess(`Emergency broadcast drill dispatched to ${res.count} recipient(s) [${res.numbers}].`);
+      } else {
+        setDrillSuccess(res.reason || res.error || 'No active subscribers found.');
+      }
       await loadSmsLogs();
       setTimeout(() => setDrillSuccess(null), 5000);
     } catch (err) {
@@ -1034,12 +1059,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
 
                     <div className="bg-white p-3 rounded-lg border border-slate-200 font-mono text-[11px] text-slate-800 leading-relaxed">
-                      {log.message}
+                      {log.message_body || log.message}
                     </div>
 
                     <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1">
-                      <span>Gateway: {log.gateway_response || 'National Emergency Gateway 200 OK'}</span>
-                      <span>{new Date(log.created_at).toLocaleString()}</span>
+                      <span>Gateway: {log.gateway_response || 'Fast2SMS Cellular Gateway 200 OK'}</span>
+                      <span>{new Date(log.dispatched_at || log.created_at || Date.now()).toLocaleString()}</span>
                     </div>
                   </div>
                 ))}

@@ -360,12 +360,16 @@ export interface SmsLog {
   recipient_phone: string;
   recipient_name?: string;
   recipient_sector: string;
-  message: string;
-  severity: 'CRITICAL' | 'WARNING' | 'ADVISORY' | 'INFO';
-  trigger_type: 'INCIDENT_VERIFIED' | 'CAP_BROADCAST' | 'GATE_APPROVED' | 'TEST_BROADCAST';
-  delivery_status: 'DELIVERED' | 'SENT' | 'FAILED';
+  alert_title?: string;
+  message?: string;
+  message_body?: string;
+  dispatched_by?: string;
+  severity?: 'CRITICAL' | 'WARNING' | 'ADVISORY' | 'INFO' | string;
+  trigger_type?: 'INCIDENT_VERIFIED' | 'CAP_BROADCAST' | 'GATE_APPROVED' | 'TEST_BROADCAST' | string;
+  delivery_status?: 'DELIVERED' | 'SENT' | 'FAILED' | 'DELIVERED_CARRIER' | string;
   gateway_response?: string;
-  created_at: string;
+  dispatched_at?: string;
+  created_at?: string;
 }
 
 export interface UserProfile {
