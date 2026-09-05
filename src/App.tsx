@@ -1,0 +1,277 @@
+/**
+ * NER Landslide Intelligence, Early Warning & Emergency Response Platform
+ * Main Application Component
+ */
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { OfflineSyncProvider } from './context/OfflineSyncContext';
+import { Header } from './components/Header';
+import { IndiaMap } from './components/IndiaMap';
+import { UserDashboard } from './components/UserDashboard';
+import { AdminDashboard } from './components/AdminDashboard';
+import { AlertsAndRoadsView } from './components/AlertsAndRoadsView';
+import { EvidenceRagView } from './components/EvidenceRagView';
+import { AiCopilotView } from './components/AiCopilotView';
+import { CitizenReportModal } from './components/CitizenReportModal';
+import { AuthModal } from './components/AuthModal';
+
+import {
+  LocationPoint,
+  RiskAssessment,
+  WeatherData,
+  OutlookDay,
+  CitizenReport,
+  Alert,
+  RoadSegment,
+  CriticalAsset
+} from './types';
+import { api } from './services/api';
+import { CURATED_INDIA_LOCATIONS } from '../server/locations';
+
+const AppContent: React.FC = () => {
+  const { user } = useAuth();
+
+  const [currentTab, setCurrentTab] = useState<string>('map');
+  const [selectedLocation, setSelectedLocation] = useState<LocationPoint>(CURATED_INDIA_LOCATIONS[0]);
+
+  const [currentRisk, setCurrentRisk] = useState<RiskAssessment | null>(null);
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [outlook, setOutlook] = useState<OutlookDay[]>([]);
+  const [reports, setReports] = useState<CitizenReport[]>([]);
+  const [userReports, setUserReports] = useState<CitizenReport[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [roads, setRoads] = useState<RoadSegment[]>([]);
+  const [assets, setAssets] = useState<CriticalAsset[]>([]);
+
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [dataFreshness, setDataFreshness] = useState('LIVE INGESTION');
+
+  // Fetch location-specific data (Risk, Weather, Outlook, Roads, Assets, Reports)
+  const refreshLocationData = useCallback(async (loc: LocationPoint) => {
+    try {
+      const [riskRes, weatherRes, outlookRes, roadRes, assetRes, reportRes] = await Promise.all([
+        api.getRisk(loc.latitude, loc.longitude),
+        api.getRainfall(loc.latitude, loc.longitude),
+        api.getOutlook(loc.latitude, loc.longitude),
+        api.getRoads(loc.latitude, loc.longitude, 120),
+        api.getAssets(loc.latitude, loc.longitude, 100),
+        api.getReports({ lat: loc.latitude, lon: loc.longitude, radius: 100 })
+      ]);
+
+      setCurrentRisk(riskRes);
+      setWeather(weatherRes);
+      setOutlook(outlookRes.outlook);
+      setRoads(roadRes.roads);
+      setAssets(assetRes.assets);
+      setReports(reportRes.reports);
+      setDataFreshness(weatherRes.status === 'LIVE' ? 'LIVE (Open-Meteo & GSI)' : 'RECENT TELEMETRY');
+    } catch (err) {
+      console.error('Failed to load location data:', err);
+    }
+  }, []);
+
+  // Fetch global platform data (Alerts, all reports, user's reports)
+  const refreshGlobalData = useCallback(async () => {
+    try {
+      const [alertRes, allRepRes] = await Promise.all([
+        api.getAlerts(),
+        api.getReports()
+      ]);
+      setAlerts(alertRes.alerts);
+      setReports(allRepRes.reports);
+
+      if (api.getToken()) {
+        const uRepRes = await api.getUserReports();
+        setUserReports(uRepRes.reports);
+      } else {
+        setUserReports([]);
+      }
+    } catch (err) {
+      console.error('Failed to load global data:', err);
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    refreshLocationData(selectedLocation);
+    refreshGlobalData();
+  }, [selectedLocation, refreshLocationData, refreshGlobalData]);
+
+  // Refresh user reports when auth state changes
+  useEffect(() => {
+    if (user) {
+      api.getUserReports()
+        .then(res => setUserReports(res.reports))
+        .catch(() => setUserReports([]));
+    } else {
+      setUserReports([]);
+    }
+  }, [user]);
+
+  // Handle selection of arbitrary coordinates anywhere on the India Map
+  const handleSelectArbitraryCoordinates = async (lat: number, lon: number) => {
+    try {
+      const rev = await api.reverseGeocode(lat, lon);
+      const customLoc: LocationPoint = {
+        id: `coord_${lat.toFixed(3)}_${lon.toFixed(3)}`,
+        name: rev.name,
+        district: rev.district,
+        state: rev.state,
+        region: 'India',
+        latitude: lat,
+        longitude: lon,
+        elevationM: 1200,
+        landslideZoneCategory: 'Geotechnical Assessment Point',
+        criticalHighways: ['Regional Highway']
+      };
+      setSelectedLocation(customLoc);
+    } catch {
+      const customLoc: LocationPoint = {
+        id: `coord_${lat.toFixed(3)}_${lon.toFixed(3)}`,
+        name: `Sector ${lat.toFixed(3)}°N, ${lon.toFixed(3)}°E`,
+        district: 'Regional District',
+        state: 'India',
+        region: 'India',
+        latitude: lat,
+        longitude: lon,
+        elevationM: 1000,
+        landslideZoneCategory: 'Custom Evaluation Sector',
+        criticalHighways: []
+      };
+      setSelectedLocation(customLoc);
+    }
+  };
+
+  // Handle road location zoom
+  const handleSelectRoadLocation = (coords: [number, number]) => {
+    handleSelectArbitraryCoordinates(coords[1], coords[0]);
+    setCurrentTab('map');
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f8fafc] text-[#1e293b] flex flex-col font-sans selection:bg-indigo-500/20 selection:text-indigo-900">
+      {/* Top Header */}
+      <Header
+        currentTab={currentTab}
+        onSelectTab={(tab) => {
+          if (tab === 'admin' && user?.role !== 'ADMIN') {
+            setIsAuthModalOpen(true);
+            return;
+          }
+          setCurrentTab(tab);
+        }}
+        selectedLocation={selectedLocation}
+        onSelectLocation={(loc) => setSelectedLocation(loc)}
+        onOpenReportModal={() => setIsReportModalOpen(true)}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        dataFreshness={dataFreshness}
+      />
+
+      {/* Main View Area */}
+      <main className="flex-1">
+        {currentTab === 'map' && (
+          <IndiaMap
+            selectedLocation={selectedLocation}
+            onSelectLocation={(loc) => setSelectedLocation(loc)}
+            onSelectArbitraryCoordinates={handleSelectArbitraryCoordinates}
+            currentRisk={currentRisk}
+            reports={reports}
+            alerts={alerts}
+            roads={roads}
+            onOpenReportModal={() => setIsReportModalOpen(true)}
+            onViewDashboard={() => setCurrentTab('dashboard')}
+          />
+        )}
+
+        {currentTab === 'dashboard' && (
+          <UserDashboard
+            location={selectedLocation}
+            risk={currentRisk}
+            weather={weather}
+            outlook={outlook}
+            reports={reports}
+            userReports={userReports}
+            alerts={alerts}
+            onOpenReportModal={() => setIsReportModalOpen(true)}
+            onOpenMap={() => setCurrentTab('map')}
+          />
+        )}
+
+        {currentTab === 'alerts' && (
+          <AlertsAndRoadsView
+            alerts={alerts}
+            roads={roads}
+            assets={assets}
+            onSelectRoadLocation={handleSelectRoadLocation}
+          />
+        )}
+
+        {currentTab === 'evidence' && (
+          <EvidenceRagView />
+        )}
+
+        {currentTab === 'copilot' && (
+          <AiCopilotView
+            location={selectedLocation}
+            risk={currentRisk}
+            weather={weather}
+          />
+        )}
+
+        {currentTab === 'admin' && (
+          <AdminDashboard
+            reports={reports}
+            alerts={alerts}
+            onRefreshData={() => {
+              refreshLocationData(selectedLocation);
+              refreshGlobalData();
+            }}
+          />
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="bg-white border-t border-slate-200 text-xs text-slate-500 py-3.5 px-4 text-center sm:flex sm:justify-between sm:items-center sm:px-6 shadow-xs">
+        <div className="font-medium text-slate-600">
+          NER Landslide Intelligence Platform &bull; Geological Survey of India &bull; NDMA Disaster Management Framework
+        </div>
+        <div className="mt-1 sm:mt-0 font-mono text-[11px] text-slate-400">
+          Deterministic Geotechnical Core &bull; Open-Meteo ECMWF/GFS &bull; MapLibre WebGL
+        </div>
+      </footer>
+
+      {/* Citizen Report Modal */}
+      <CitizenReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        defaultLocation={selectedLocation}
+        onReportSubmitted={() => {
+          refreshLocationData(selectedLocation);
+          refreshGlobalData();
+        }}
+        onOpenAuthModal={() => {
+          setIsReportModalOpen(false);
+          setIsAuthModalOpen(true);
+        }}
+      />
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
+    </div>
+  );
+};
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <OfflineSyncProvider>
+        <AppContent />
+      </OfflineSyncProvider>
+    </AuthProvider>
+  );
+}

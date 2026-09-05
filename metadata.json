@@ -1,0 +1,6 @@
+{
+  "name": "NER Landslide Intelligence & Early Warning Platform",
+  "description": "India-wide Landslide Intelligence, Early Warning, Risk Simulation and Emergency Response Platform with Geospatial Risk Map, Citizen Field Reports, and AI Response Copilot.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
