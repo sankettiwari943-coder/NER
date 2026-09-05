@@ -175,33 +175,54 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {!user ? (
-            <div className="flex items-center gap-1.5 text-[11px]">
-              <span className="text-slate-400">Demo Access:</span>
-              <button
-                id="btn-quick-analyst"
-                onClick={() => fastLogin('citizen')}
-                className="px-2.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition font-medium cursor-pointer"
-              >
-                Citizen Scout
-              </button>
-              <button
-                id="btn-quick-admin"
-                onClick={() => fastLogin('admin')}
-                className="px-2.5 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/60 transition font-bold cursor-pointer"
-              >
-                NDMA Admin
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-slate-400">User:</span>
-              <span className="font-medium text-slate-200 truncate max-w-[150px]">{user.full_name}</span>
+        <div className="flex items-center gap-3">
+          {/* Demo Access Session Switcher */}
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className="text-slate-400 hidden sm:inline">Demo Access:</span>
+            <button
+              id="btn-quick-analyst"
+              onClick={async () => {
+                await fastLogin('citizen');
+                onSelectTab('map');
+              }}
+              className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
+                user && user.email !== ADMIN_EMAIL
+                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+              }`}
+              title="Authenticate as Field Officer (Citizen Scout) - scout@ner.gov.in"
+            >
+              Citizen Scout
+            </button>
+            <button
+              id="btn-quick-admin"
+              onClick={async () => {
+                await fastLogin('admin');
+                onSelectTab('admin');
+              }}
+              className={`px-2.5 py-0.5 rounded text-[11px] font-bold transition cursor-pointer ${
+                user && (user.email === ADMIN_EMAIL || user.email === 'sankettiwari943@gmail.com')
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/60'
+              }`}
+              title="Authenticate as NDMA Admin - sankettiwari943@gmail.com"
+            >
+              NDMA Admin
+            </button>
+          </div>
+
+          {user && (
+            <div className="flex items-center gap-1.5 pl-2 border-l border-slate-700 text-[11px]">
+              <span className="text-slate-400 hidden md:inline">User:</span>
+              <span className="font-semibold text-slate-200 truncate max-w-[140px] sm:max-w-[180px]" title={user.full_name}>
+                {user.full_name}
+              </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                isAdmin ? 'bg-rose-900/90 text-rose-200 border border-rose-700' : 'bg-indigo-900/90 text-indigo-200 border border-indigo-700'
+                (user.email === ADMIN_EMAIL || user.email === 'sankettiwari943@gmail.com')
+                  ? 'bg-rose-900/90 text-rose-200 border border-rose-700'
+                  : 'bg-indigo-900/90 text-indigo-200 border border-indigo-700'
               }`}>
-                {user.role}
+                {(user.email === ADMIN_EMAIL || user.email === 'sankettiwari943@gmail.com') ? 'ADMIN' : 'USER'}
               </span>
             </div>
           )}

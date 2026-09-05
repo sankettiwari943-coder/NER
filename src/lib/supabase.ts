@@ -303,13 +303,13 @@ class SupabaseAuthClient {
    */
   public async signInAsDemoRole(targetRole: 'admin' | 'citizen'): Promise<AuthResponse> {
     const isAdm = targetRole === 'admin';
-    const email = isAdm ? ADMIN_EMAIL : 'citizen.scout@ner-landslide.in';
+    const email = isAdm ? ADMIN_EMAIL : 'scout@ner.gov.in';
     const user: SupabaseUser = {
       id: isAdm ? 'usr_admin_sanket' : 'usr_citizen_scout',
       email,
-      full_name: isAdm ? 'Sanket Tiwari (NDMA Authority)' : 'Tsering Dorjee (Citizen Scout)',
+      full_name: isAdm ? 'Sanket Tiwari (NDMA Authority)' : 'Field Officer (Citizen Scout)',
       role: isAdm ? 'admin' : 'citizen',
-      organization: isAdm ? 'National Disaster Management Authority (NDMA)' : 'Citizen Scout Network',
+      organization: isAdm ? 'National Disaster Management Authority (NDMA)' : 'Citizen Field Scout Network',
       created_at: new Date().toISOString(),
     };
 
