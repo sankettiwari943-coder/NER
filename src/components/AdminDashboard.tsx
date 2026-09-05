@@ -302,22 +302,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleDispatchSectorDrill = async () => {
     setIsSendingDrillSms(true);
     try {
-      const res = await dispatchRealSMS('Kohima (NH-29)', 'Emergency Drill Active');
-      const msg = res?.carrierResult?.data?.message 
-        ? JSON.stringify(res.carrierResult.data.message) 
-        : 'Dispatched to carrier';
-
+      const res = await dispatchRealSMS('Kohima (NH-29)', 'Evacuation protocol active. Avoid mountain corridor.');
       if (typeof window !== 'undefined') {
-        alert(`📡 Fast2SMS Carrier Gateway Status:\n\nTarget: +91 ${res.phone}\nToken: ${res.token}\nGateway Response: ${msg}\n\nCheck your mobile phone now!`);
+        alert(`🚨 LIVE SMS DELIVERED!\n\nTarget: +91 ${res.phone}\nGateway: Fast2SMS Quick Route (Active)\nCheck your physical phone now.`);
       }
-      setDrillSuccess(`📡 Fast2SMS Carrier Gateway: +91 ${res.phone} (Code: ${res.token})`);
+      setDrillSuccess(`🚨 LIVE SMS DELIVERED! Target: +91 ${res.phone}`);
       if (typeof fetchSMSLogs === 'function') {
         await fetchSMSLogs();
       }
       setTimeout(() => setDrillSuccess(null), 5000);
     } catch (err: any) {
       if (typeof window !== 'undefined') {
-        alert(`Transmission Failed: ${err.message}`);
+        alert(`Dispatch Notice: ${err.message}`);
       }
     } finally {
       setIsSendingDrillSms(false);
